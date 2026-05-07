@@ -54,6 +54,36 @@ pub fn programmer_panel(mut ctx: EguiContexts, mut prog: ResMut<Programmer>) {
 
             ui.add_space(8.0);
 
+            // ── Beam ──────────────────────────────────────────────────────────
+            ui.label(
+                egui::RichText::new("BEAM")
+                    .strong()
+                    .color(egui::Color32::from_rgb(180, 255, 180)),
+            );
+            ui.horizontal(|ui| {
+                ui.add(
+                    egui::Slider::new(&mut prog.zoom, 0.0..=1.0)
+                        .show_value(false)
+                        .clamping(egui::SliderClamping::Always),
+                );
+                let angle_deg = 5.0 + prog.zoom * 40.0;
+                ui.monospace(format!("Zoom {:.0}°", angle_deg));
+            });
+            ui.horizontal(|ui| {
+                ui.add(
+                    egui::Slider::new(&mut prog.strobe, 0.0..=1.0)
+                        .show_value(false)
+                        .clamping(egui::SliderClamping::Always),
+                );
+                if prog.strobe < 0.01 {
+                    ui.monospace("Strobe OFF");
+                } else {
+                    ui.monospace(format!("Strobe {:.0} Hz", prog.strobe * 25.0));
+                }
+            });
+
+            ui.add_space(8.0);
+
             // ── Colour ────────────────────────────────────────────────────────
             ui.label(
                 egui::RichText::new("COLOUR")
@@ -80,6 +110,38 @@ pub fn programmer_panel(mut ctx: EguiContexts, mut prog: ResMut<Programmer>) {
                 }
             });
 
+            ui.add_space(8.0);
+
+            // ── Gobo ──────────────────────────────────────────────────────────
+            ui.label(
+                egui::RichText::new("GOBO")
+                    .strong()
+                    .color(egui::Color32::from_rgb(255, 200, 120)),
+            );
+            ui.horizontal_wrapped(|ui| {
+                for (i, label) in ["Open", "Dots", "Breakup", "Star"].iter().enumerate() {
+                    let selected = prog.gobo_index == i;
+                    if ui
+                        .selectable_label(selected, *label)
+                        .clicked()
+                    {
+                        prog.gobo_index = i;
+                    }
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.add(
+                    egui::Slider::new(&mut prog.gobo_spin, -3.0..=3.0)
+                        .show_value(false)
+                        .clamping(egui::SliderClamping::Always),
+                );
+                if prog.gobo_spin.abs() < 0.05 {
+                    ui.monospace("Spin OFF");
+                } else {
+                    ui.monospace(format!("Spin {:+.1} r/s", prog.gobo_spin));
+                }
+            });
+
             ui.separator();
 
             // ── Quick actions ─────────────────────────────────────────────────
@@ -102,7 +164,7 @@ pub fn programmer_panel(mut ctx: EguiContexts, mut prog: ResMut<Programmer>) {
 
             ui.add_space(4.0);
             ui.label(
-                egui::RichText::new("Arrow keys = Pan/Tilt  |  +/- = Dimmer  |  W/X/C = colour")
+                egui::RichText::new("Arrow keys = Pan/Tilt  |  +/- = Dimmer  |  Z/z = Zoom  |  W/X/C = colour")
                     .small()
                     .color(egui::Color32::GRAY),
             );

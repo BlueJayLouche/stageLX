@@ -8,19 +8,25 @@ use stagelx_core::{
     fixture::FixtureInstance,
     types::{DmxAddress, FixtureId},
 };
-use stagelx_ui::{FixtureLibraryRes, PatchRes};
+use stagelx_state::{FixtureLibraryRes, PatchRes};
+use beam::{BeamMaterial, GoboLibrary, setup_gobos};
 use fixture::{FixtureSpawnConfig, spawn_fixture};
 
 pub struct StageLxRenderPlugin;
 
 impl Plugin for StageLxRenderPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, (scene::setup_scene, spawn_demo_fixtures).chain())
+        app.add_plugins(MaterialPlugin::<BeamMaterial>::default())
+            .add_systems(
+                Startup,
+                (scene::setup_scene, setup_gobos, spawn_demo_fixtures).chain(),
+            )
             .add_systems(
                 Update,
                 (
                     fixture::keyboard_programmer,
                     fixture::articulate_fixtures,
+                    fixture::articulate_beams,
                 )
                     .chain(),
             );
@@ -33,18 +39,21 @@ fn spawn_demo_fixtures(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut beam_materials: ResMut<Assets<BeamMaterial>>,
     mut patch: ResMut<PatchRes>,
-    mut _library: ResMut<FixtureLibraryRes>,
+    _library: Res<FixtureLibraryRes>,
+    gobo_library: Res<GoboLibrary>,
 ) {
     const COUNT: usize = 10;
     const SPACING: f32 = 1.8;
     let total_width = (COUNT - 1) as f32 * SPACING;
+    let open_gobo = gobo_library.handles[0].clone();
 
     for i in 0..COUNT {
         let x = -total_width / 2.0 + i as f32 * SPACING;
 
         let id = patch.0.add(FixtureInstance {
-            id: FixtureId(0), // assigned by Patch::add
+            id: FixtureId(0),
             name: format!("MH {}", i + 1),
             fixture_type_id: "generic-moving-head".into(),
             dmx_mode: "Standard".into(),
@@ -57,6 +66,7 @@ fn spawn_demo_fixtures(
             &mut commands,
             &mut meshes,
             &mut materials,
+            &mut beam_materials,
             FixtureSpawnConfig {
                 id,
                 position: Vec3::new(x, 6.0, 0.0),
@@ -65,6 +75,7 @@ fn spawn_demo_fixtures(
                 tilt_range: 270.0,
                 beam_angle_deg: 10.0,
             },
+            open_gobo.clone(),
         );
     }
 }
