@@ -257,33 +257,50 @@ MVR files extend this with scene context:
 
 ---
 
-### Phase 4 — MVR + GDTF Geometry + USB DMX (Weeks 13–16)
+### Phase 4 — MVR + GDTF Geometry + USB DMX ✅ Complete
 **Goal**: Import a full show file from MA3 / Depence2 and see the venue + patch.
 
-- [ ] USB DMX output (Enttec USB Pro protocol over `serialport`, single universe)
-- [ ] `stagelx-gdtf`: MVR parser (scene positions, fixture placement, trusses)
-- [ ] Import MVR: place fixtures in 3D from MVR transforms
-- [ ] Load GDTF 3D geometry (OBJ/3DS → Bevy mesh)
-- [ ] Articulated geometry: yoke/head rotation driven by Pan/Tilt
-- [ ] MVR export (scene + patch → `.mvr` file)
-- [ ] Truss / structure geometry from MVR
+- [x] USB DMX output (Enttec USB Pro protocol over `serialport`, NonSend resource, 44 Hz)
+- [x] `stagelx-gdtf`: MVR parser (scene positions, fixture placement, embedded GDTFs)
+- [x] Import MVR: place fixtures in 3D from MVR transforms (Z-up mm → Y-up m)
+- [x] `stagelx-3ds`: pure-Rust 3DS binary chunk parser with `to_bevy_buffers()` helper
+- [x] Observer-based fixture lifecycle (`On<SpawnFixtureEvent>` / `On<DespawnFixtureEvent>`)
+- [x] GDTF-driven DMX channel mapping (pan/tilt/dimmer/colour from channel offsets)
+- [x] Patch add-fixture UI (GDTF type + mode selector, universe/channel form)
+- [ ] Wire 3DS geometry → actual Bevy mesh in renderer (parser done, render hookup deferred)
+- [ ] MVR export (scene + patch → `.mvr` file) — deferred to Phase 5
+- [ ] Truss / structure geometry from MVR — deferred to Phase 5
 
-**Milestone**: Import an MVR file exported from MA3, see accurate venue layout and fixture models.
+**Milestone**: MVR import places fixtures from real show files; USB DMX output to Enttec dongles. ✅
 
 ---
 
-### Phase 5 — MIDI, OSC + Advanced Rendering (Weeks 17–20)
-**Goal**: Full input surface coverage + professional rendering quality.
+---
 
-- [ ] MIDI input: CC → attribute mapping, configurable per fixture/group
-- [ ] OSC input: `/fixture/{id}/{attr}` message handling
-- [ ] Volumetric fog/atmosphere shader (ray-marched cone)
-- [ ] Gobo physical rotation (indexed vs. rotating wheel behavior)
-- [ ] Iris / shutter cuts (framing shutters if in GDTF)
-- [ ] Multiple viewports (FOH view, top view, side view)
-- [ ] Camera animation / saved positions
+### Phase 5 — Geometry, I/O Surfaces + Advanced Rendering (Weeks 17–20)
+**Goal**: Real fixture/venue geometry, full input surface coverage, professional rendering.
 
-**Milestone**: Full live control from a MIDI surface, OSC from TouchDesigner, with volumetric beams in fog.
+**Geometry loading**
+- [ ] Wire `stagelx_3ds::to_bevy_buffers()` into `on_fixture_spawned` (real GDTF models, cuboid fallback)
+- [ ] OBJ venue loader (`tobj` → Bevy mesh, same pattern as 3DS)
+- [ ] glTF/GLB venue loader (`gltf` crate → Bevy mesh)
+- [ ] "Scene Assets" UI section: load venue files, place at configurable world offset
+
+**I/O surfaces**
+- [ ] MIDI input: `midir` callback → crossbeam → Bevy; CC → attribute mapping per fixture/group
+- [ ] OSC input: `rosc` UDP → crossbeam → Bevy; `/fixture/{id}/{attr}` float messages
+- [ ] MIDI + OSC config UI (device selector, port, CC mapping table)
+
+**MVR export** (deferred from Phase 4)
+- [ ] Write `GeneralSceneDescription.xml` from current patch + library
+- [ ] Package GDTFs + XML into ZIP → save `.mvr` file
+
+**Rendering upgrades**
+- [ ] Ray-marched volumetric fog cone in `BeamMaterial` WGSL shader (march view ray through cone volume, accumulate density)
+- [ ] Split-screen viewports: primary FOH perspective (3/4 width) + top ortho + side ortho
+- [ ] Camera orbit/pan for FOH view; fixed orthographic cameras for top/side
+
+**Milestone**: Load a real venue GLB, import an MVR with GDTF fixture models, control from a MIDI surface or OSC (TouchDesigner), see volumetric beams in three views simultaneously.
 
 ---
 
@@ -330,4 +347,4 @@ Suggested `.gitignore`: standard Rust gitignore + `*.gdtf` test files (large bin
 
 ---
 
-*Last updated: 2026-05-07 — Phase 3 complete*
+*Last updated: 2026-05-07 — Phase 5 in progress*
