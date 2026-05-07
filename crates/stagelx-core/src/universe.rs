@@ -51,6 +51,13 @@ impl DmxBuffer {
     pub fn clear(&mut self) {
         self.data.fill(0);
     }
+
+    /// Overwrite channels from a raw slice; zeros any channels beyond the slice length.
+    pub fn copy_from_slice(&mut self, src: &[u8]) {
+        let n = src.len().min(DMX_CHANNELS);
+        self.data[..n].copy_from_slice(&src[..n]);
+        self.data[n..].fill(0);
+    }
 }
 
 /// Manages multiple DMX universes indexed by universe number.

@@ -25,6 +25,26 @@ impl DmxEngine {
         self.sources.sort_by_key(|s| s.priority);
     }
 
+    /// Return an existing source by name, or create it with the given priority/strategy.
+    pub fn get_or_add_source(
+        &mut self,
+        name: &str,
+        priority: u8,
+        strategy: MergeStrategy,
+    ) -> &mut DmxSource {
+        if let Some(pos) = self.sources.iter().position(|s| s.name == name) {
+            return &mut self.sources[pos];
+        }
+        self.add_source(DmxSource {
+            name: name.to_string(),
+            priority,
+            strategy,
+            universes: UniverseSet::default(),
+        });
+        let pos = self.sources.iter().position(|s| s.name == name).unwrap();
+        &mut self.sources[pos]
+    }
+
     /// Recompute the output universes from all sources.
     pub fn tick(&mut self) {
         // Collect universe IDs across all sources
