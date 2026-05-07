@@ -4,45 +4,18 @@ pub mod gobo;
 pub mod scene;
 
 use bevy::prelude::*;
+use stagelx_core::{
+    fixture::FixtureInstance,
+    types::{DmxAddress, FixtureId},
+};
+use stagelx_ui::{FixtureLibraryRes, PatchRes};
 use fixture::{FixtureSpawnConfig, spawn_fixture};
-use stagelx_core::types::FixtureId;
-
-// ─── Programmer resource ──────────────────────────────────────────────────────
-
-/// Simple direct-value programmer for Phase 1.
-/// All values are normalised 0.0–1.0. Phase 3 will replace this with the
-/// full DmxEngine + per-fixture DMX addressing.
-#[derive(Resource)]
-pub struct Programmer {
-    pub pan: f32,
-    pub tilt: f32,
-    pub dimmer: f32,
-    pub color: [f32; 3],
-    pub pan_range: f32,
-    pub tilt_range: f32,
-}
-
-impl Default for Programmer {
-    fn default() -> Self {
-        Self {
-            pan: 0.5,
-            tilt: 0.5,
-            dimmer: 1.0,
-            color: [1.0, 1.0, 1.0],
-            pan_range: 540.0,
-            tilt_range: 270.0,
-        }
-    }
-}
-
-// ─── Plugin ───────────────────────────────────────────────────────────────────
 
 pub struct StageLxRenderPlugin;
 
 impl Plugin for StageLxRenderPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<Programmer>()
-            .add_systems(Startup, (scene::setup_scene, spawn_demo_fixtures).chain())
+        app.add_systems(Startup, (scene::setup_scene, spawn_demo_fixtures).chain())
             .add_systems(
                 Update,
                 (
@@ -56,12 +29,12 @@ impl Plugin for StageLxRenderPlugin {
 
 // ─── Demo fixture startup ─────────────────────────────────────────────────────
 
-/// Spawns 10 generic moving heads on the truss for the Phase 1 demo.
-/// Replace this with patch-driven spawning in Phase 1 UI work.
 fn spawn_demo_fixtures(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut patch: ResMut<PatchRes>,
+    mut _library: ResMut<FixtureLibraryRes>,
 ) {
     const COUNT: usize = 10;
     const SPACING: f32 = 1.8;
@@ -69,12 +42,23 @@ fn spawn_demo_fixtures(
 
     for i in 0..COUNT {
         let x = -total_width / 2.0 + i as f32 * SPACING;
+
+        let id = patch.0.add(FixtureInstance {
+            id: FixtureId(0), // assigned by Patch::add
+            name: format!("MH {}", i + 1),
+            fixture_type_id: "generic-moving-head".into(),
+            dmx_mode: "Standard".into(),
+            address: DmxAddress::new(1, (i as u16 * 8 + 1).min(512)),
+            position: [x, 6.0, 0.0],
+            rotation: [0.0, 0.0, 0.0],
+        });
+
         spawn_fixture(
             &mut commands,
             &mut meshes,
             &mut materials,
             FixtureSpawnConfig {
-                id: FixtureId(i as u32),
+                id,
                 position: Vec3::new(x, 6.0, 0.0),
                 suspended: true,
                 pan_range: 540.0,

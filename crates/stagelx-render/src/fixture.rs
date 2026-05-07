@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use stagelx_core::types::FixtureId;
+use stagelx_ui::Programmer;
 
 // ─── Components ───────────────────────────────────────────────────────────────
 
@@ -126,7 +127,7 @@ pub fn spawn_fixture(
 
 /// Reads the Programmer resource and updates fixture joint transforms each frame.
 pub fn articulate_fixtures(
-    programmer: Res<crate::Programmer>,
+    programmer: Res<Programmer>,
     mut yoke_q: Query<(&YokeJoint, &mut Transform)>,
     mut head_q: Query<(&HeadJoint, &mut Transform)>,
     mut beam_q: Query<(&BeamSource, &mut PointLight)>,
@@ -154,7 +155,7 @@ pub fn articulate_fixtures(
 
 pub fn keyboard_programmer(
     keys: Res<ButtonInput<KeyCode>>,
-    mut programmer: ResMut<crate::Programmer>,
+    mut programmer: ResMut<Programmer>,
     time: Res<Time>,
 ) {
     let dt = time.delta_secs();
