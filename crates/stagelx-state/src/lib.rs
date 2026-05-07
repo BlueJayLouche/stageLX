@@ -136,6 +136,29 @@ pub struct IoConfig {
     pub usb_universe: u16,
     pub usb_tx_count: u64,
     pub usb_status: String,
+
+    // ── MIDI input ────────────────────────────────────────────────────────────
+    pub midi_enabled: bool,
+    /// MIDI port name (exact string from midir port listing).
+    pub midi_port: String,
+    pub midi_status: String,
+    pub midi_rx_count: u64,
+    /// MIDI CC numbers mapped to programmer attributes.
+    pub midi_cc_dimmer: u8,
+    pub midi_cc_pan: u8,
+    pub midi_cc_tilt: u8,
+    pub midi_cc_red: u8,
+    pub midi_cc_green: u8,
+    pub midi_cc_blue: u8,
+    pub midi_cc_zoom: u8,
+    pub midi_cc_strobe: u8,
+
+    // ── OSC input ─────────────────────────────────────────────────────────────
+    pub osc_enabled: bool,
+    /// UDP port for OSC listener (default 8000).
+    pub osc_port: u16,
+    pub osc_status: String,
+    pub osc_rx_count: u64,
 }
 
 impl Default for IoConfig {
@@ -164,6 +187,24 @@ impl Default for IoConfig {
             usb_universe: 1,
             usb_tx_count: 0,
             usb_status: "Idle".into(),
+
+            midi_enabled: false,
+            midi_port: String::new(),
+            midi_status: "Idle".into(),
+            midi_rx_count: 0,
+            midi_cc_dimmer: 7,
+            midi_cc_pan: 10,
+            midi_cc_tilt: 11,
+            midi_cc_red: 12,
+            midi_cc_green: 13,
+            midi_cc_blue: 14,
+            midi_cc_zoom: 15,
+            midi_cc_strobe: 16,
+
+            osc_enabled: false,
+            osc_port: 8000,
+            osc_status: "Idle".into(),
+            osc_rx_count: 0,
         }
     }
 }
