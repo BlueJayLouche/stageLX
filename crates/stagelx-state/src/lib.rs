@@ -1,12 +1,24 @@
-//! Shared Bevy Resources for stageLX.
+//! Shared Bevy Resources and Events for stageLX.
 //!
 //! Lives in its own crate so that stagelx-render, stagelx-io, and stagelx-ui
 //! can all depend on the resource *types* without any of them depending on
 //! each other.
 
 use bevy::prelude::*;
-use stagelx_core::patch::Patch;
+use stagelx_core::{patch::Patch, types::FixtureId};
 use stagelx_gdtf::FixtureLibrary;
+
+// ─── Events ───────────────────────────────────────────────────────────────────
+
+/// Emitted by the patch UI or MVR importer when a fixture is added to the patch.
+/// The render plugin responds by spawning the 3D scene entity.
+#[derive(Event, Debug, Clone, Copy)]
+pub struct SpawnFixtureEvent(pub FixtureId);
+
+/// Emitted when a fixture is removed from the patch.
+/// The render plugin responds by despawning the corresponding scene entity.
+#[derive(Event, Debug, Clone, Copy)]
+pub struct DespawnFixtureEvent(pub FixtureId);
 
 // ─── Programmer ───────────────────────────────────────────────────────────────
 
@@ -53,6 +65,19 @@ impl Default for Programmer {
 #[derive(Resource, Default)]
 pub struct PatchRes(pub Patch);
 
+// ─── PatchEditState ───────────────────────────────────────────────────────────
+
+/// Transient state for the patch panel "Add Fixture" form.
+#[derive(Resource, Default)]
+pub struct PatchEditState {
+    pub selected_type_id: String,
+    pub selected_mode:    String,
+    pub new_name:         String,
+    pub universe_str:     String,
+    pub channel_str:      String,
+    pub add_error:        Option<String>,
+}
+
 // ─── FixtureLibraryRes ────────────────────────────────────────────────────────
 
 /// Bevy Resource wrapping the loaded GDTF fixture library.
@@ -62,6 +87,9 @@ pub struct FixtureLibraryRes {
     /// Text field state for the GDTF import path input.
     pub import_path: String,
     pub import_error: Option<String>,
+    /// MVR import state.
+    pub mvr_import_path: String,
+    pub mvr_import_error: Option<String>,
 }
 
 // ─── IoConfig ─────────────────────────────────────────────────────────────────
@@ -98,6 +126,16 @@ pub struct IoConfig {
     pub sacn_tx_count: u64,
     pub sacn_rx_count: u64,
     pub sacn_status: String,
+
+    // ── USB DMX (Enttec USB Pro) ──────────────────────────────────────────────
+    /// Enable USB DMX output.
+    pub usb_tx_enabled: bool,
+    /// Serial port path, e.g. "/dev/tty.usbserial-ABC123" or "COM3".
+    pub usb_port: String,
+    /// Universe to send on the USB device.
+    pub usb_universe: u16,
+    pub usb_tx_count: u64,
+    pub usb_status: String,
 }
 
 impl Default for IoConfig {
@@ -120,6 +158,12 @@ impl Default for IoConfig {
             sacn_tx_count: 0,
             sacn_rx_count: 0,
             sacn_status: "Idle".into(),
+
+            usb_tx_enabled: false,
+            usb_port: String::new(),
+            usb_universe: 1,
+            usb_tx_count: 0,
+            usb_status: "Idle".into(),
         }
     }
 }
