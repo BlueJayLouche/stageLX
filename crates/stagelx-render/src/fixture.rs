@@ -7,6 +7,9 @@ use stagelx_core::types::FixtureId;
 use stagelx_state::{FixtureLibraryRes, PatchRes, Programmer, SpawnFixtureEvent, DespawnFixtureEvent};
 use crate::beam::{BeamMaterial, GoboLibrary, build_beam_cone};
 
+const BEAM_HEIGHT: f32 = 18.0;
+const LENS_OFFSET: f32 = 0.14;
+
 // ─── Components ───────────────────────────────────────────────────────────────
 
 #[derive(Component)]
@@ -160,9 +163,6 @@ pub fn spawn_fixture(
     let yoke_y = if cfg.suspended { -0.18 } else { 0.18 };
     let head_y = if cfg.suspended { -0.22 } else { 0.22 };
 
-    const BEAM_HEIGHT: f32 = 18.0;
-    const LENS_OFFSET: f32 = 0.14;
-
     let half_angle  = (cfg.beam_angle_deg * 0.5).to_radians();
     let beam_radius = BEAM_HEIGHT * half_angle.tan();
 
@@ -177,6 +177,9 @@ pub fn spawn_fixture(
         color: LinearRgba::WHITE,
         gobo_params: Vec4::ZERO,
         gobo: open_gobo,
+        // x=half_angle_rad  y=cone_length_m  z=scatter_k  w=extinction_k
+        beam_params: Vec4::new(half_angle, BEAM_HEIGHT, 2.0, 0.8),
+        world_to_cone: Mat4::IDENTITY,
     });
 
     commands
@@ -245,7 +248,7 @@ pub fn articulate_beams(
     programmer: Res<Programmer>,
     time: Res<Time>,
     mut beam_q: Query<
-        (&MeshMaterial3d<BeamMaterial>, &mut Transform),
+        (&MeshMaterial3d<BeamMaterial>, &mut Transform, &GlobalTransform),
         (With<BeamCone>, Without<YokeJoint>, Without<HeadJoint>),
     >,
     mut light_q: Query<&mut PointLight, With<BeamSource>>,
@@ -281,11 +284,18 @@ pub fn articulate_beams(
         .cloned()
         .unwrap_or_else(|| gobo_library.handles[0].clone());
 
-    for (handle, mut transform) in &mut beam_q {
+    for (handle, mut transform, global_tf) in &mut beam_q {
         if let Some(mat) = beam_materials.get_mut(handle.id()) {
-            mat.color       = color;
-            mat.gobo_params = gobo_params;
-            mat.gobo        = gobo_handle.clone();
+            mat.color         = color;
+            mat.gobo_params   = gobo_params;
+            mat.gobo          = gobo_handle.clone();
+            mat.world_to_cone = global_tf.to_matrix().inverse();
+            mat.beam_params   = Vec4::new(
+                target_half_deg.to_radians(),
+                BEAM_HEIGHT,
+                2.0,
+                0.8,
+            );
         }
         transform.scale = Vec3::new(scale_xz, 1.0, scale_xz);
     }

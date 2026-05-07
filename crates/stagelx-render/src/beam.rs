@@ -12,19 +12,31 @@ use bevy::{
 
 // ─── BeamMaterial ─────────────────────────────────────────────────────────────
 
-/// Custom material for beam cones.
-/// - `color`       — rgba premultiplied by dimmer/strobe, maps to vec4<f32> binding 0
-/// - `gobo_params` — x = rotation (radians), binding 1
-/// - `gobo`        — gobo mask texture, binding 2/3
+/// Custom material for beam cones — volumetric ray-marched fog shaft.
+///
+/// Bindings:
+///   0  color        — linear RGBA premultiplied by dimmer/strobe
+///   1  gobo_params  — x=rotation_radians (y/z/w unused)
+///   2  gobo         — gobo mask texture
+///   3  gobo sampler — auto
+///   4  beam_params  — x=half_angle_rad  y=cone_length_m  z=scatter_k  w=extinction_k
+///   5  world_to_cone — inverse GlobalTransform of the cone entity (updated each frame)
 #[derive(Asset, TypePath, AsBindGroup, Clone)]
 pub struct BeamMaterial {
     #[uniform(0)]
     pub color: LinearRgba,
     #[uniform(1)]
-    pub gobo_params: Vec4, // x = rotation_radians
+    pub gobo_params: Vec4,
     #[texture(2)]
     #[sampler(3)]
     pub gobo: Handle<Image>,
+    /// x = half_angle_rad, y = cone_length_m, z = scatter_k, w = extinction_k
+    #[uniform(4)]
+    pub beam_params: Vec4,
+    /// Inverse world transform of the cone mesh entity — transforms world→cone-local.
+    /// Written by articulate_beams every frame from GlobalTransform.
+    #[uniform(5)]
+    pub world_to_cone: Mat4,
 }
 
 impl Material for BeamMaterial {
