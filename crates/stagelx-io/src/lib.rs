@@ -12,10 +12,10 @@ use artnet::{
     dmx_engine_tick, programmer_to_dmx,
 };
 use sacn::{SacnState, sacn_manage_socket, sacn_receive, sacn_send};
+use usb::{UsbDmxState, usb_manage_device, usb_send};
 use stagelx_dmx::engine::DmxEngine;
 
-/// Art-Net and sACN output rate.  E1.31 §6.6 recommends ≥ 44 Hz; Art-Net
-/// nodes also expect keepalives at this rate.
+/// Art-Net, sACN, and USB DMX output rate.  E1.31 §6.6 recommends ≥ 44 Hz.
 const DMX_OUTPUT_HZ: f64 = 44.0;
 
 pub struct IoPlugin;
@@ -25,25 +25,25 @@ impl Plugin for IoPlugin {
         app.insert_resource(DmxEngineRes(DmxEngine::default()))
             .init_resource::<ArtNetState>()
             .init_resource::<SacnState>()
-            // Run the fixed-rate DMX output at exactly 44 Hz regardless of
-            // render frame rate.  Instant-polling in Update would work but
-            // burns CPU checking the clock on every rendered frame.
+            .insert_non_send_resource(UsbDmxState::default())
             .insert_resource(Time::<Fixed>::from_hz(DMX_OUTPUT_HZ))
-            // Every render frame: manage sockets and drain incoming packets.
+            // Every render frame: manage sockets/devices, drain incoming packets.
             .add_systems(
                 Update,
                 (
                     artnet_manage_socket,
                     sacn_manage_socket,
+                    usb_manage_device,
                     artnet_receive,
                     sacn_receive,
                 )
                     .chain(),
             )
-            // Exactly 44 times/sec: write programmer → DMX, merge, send.
-            .add_systems(
-                FixedUpdate,
-                (programmer_to_dmx, dmx_engine_tick, artnet_send, sacn_send).chain(),
-            );
+            // Exactly 44 times/sec: write programmer → DMX, merge, send all outputs.
+            .add_systems(FixedUpdate, programmer_to_dmx)
+            .add_systems(FixedUpdate, dmx_engine_tick.after(programmer_to_dmx))
+            .add_systems(FixedUpdate, artnet_send.after(dmx_engine_tick))
+            .add_systems(FixedUpdate, sacn_send.after(artnet_send))
+            .add_systems(FixedUpdate, usb_send.after(sacn_send));
     }
 }

@@ -6,14 +6,9 @@ edition = "2021"
 [dependencies]
 stagelx-core      = { workspace = true }
 stagelx-dmx       = { workspace = true }
+stagelx-gdtf      = { workspace = true }
 stagelx-state     = { workspace = true }
 bevy              = { workspace = true }
 thiserror         = { workspace = true }
-tokio             = { workspace = true }
 crossbeam-channel = { workspace = true }
-
-# Protocol-specific crates added in Phase 3:
-# sacn = "0.9"
-# serialport = "4"
-# midir = "0.10"
-# rosc = "0.10"
+serialport        = { workspace = true }

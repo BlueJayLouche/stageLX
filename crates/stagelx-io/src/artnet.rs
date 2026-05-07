@@ -6,7 +6,8 @@ use std::{
 use bevy::prelude::*;
 use crossbeam_channel::{bounded, Receiver, Sender};
 use stagelx_dmx::engine::DmxEngine;
-use stagelx_state::IoConfig;
+use stagelx_gdtf::gdtf::DmxMode;
+use stagelx_state::{FixtureLibraryRes, IoConfig};
 
 pub const ARTNET_PORT: u16 = 6454;
 // Cap the number of universes accepted from any single Art-Net source to
@@ -228,32 +229,79 @@ pub fn programmer_to_dmx(
     mut engine: ResMut<DmxEngineRes>,
     programmer: Res<stagelx_state::Programmer>,
     patch: Res<stagelx_state::PatchRes>,
+    library: Res<FixtureLibraryRes>,
 ) {
     let source = engine
         .0
         .get_or_add_source("programmer", 200, stagelx_dmx::merge::MergeStrategy::Ltp);
 
     let dimmer_byte = (programmer.dimmer * 255.0) as u8;
-    let pan_raw = (programmer.pan * 65535.0) as u16;
-    let tilt_raw = (programmer.tilt * 65535.0) as u16;
+    let pan_raw     = (programmer.pan    * 65535.0) as u16;
+    let tilt_raw    = (programmer.tilt   * 65535.0) as u16;
     let r = (programmer.color[0] * 255.0) as u8;
     let g = (programmer.color[1] * 255.0) as u8;
     let b = (programmer.color[2] * 255.0) as u8;
 
     for inst in patch.0.fixtures() {
-        let base = inst.address.channel;
+        let base     = inst.address.channel;
         let universe = inst.address.universe;
-        let buf = source.universes.get_or_insert(universe);
+        let buf      = source.universes.get_or_insert(universe);
 
-        // 8-ch map: Dimmer | Pan MSB | Pan Fine | Tilt MSB | Tilt Fine | R | G | B
-        buf.set(base,     dimmer_byte);
-        buf.set(base + 1, (pan_raw >> 8) as u8);
-        buf.set(base + 2, (pan_raw & 0xFF) as u8);
-        buf.set(base + 3, (tilt_raw >> 8) as u8);
-        buf.set(base + 4, (tilt_raw & 0xFF) as u8);
-        buf.set(base + 5, r);
-        buf.set(base + 6, g);
-        buf.set(base + 7, b);
+        // Use GDTF channel offsets when the fixture type is loaded; fall back to
+        // the generic 8-channel layout for unloaded or procedural fixtures.
+        let mode = library
+            .library
+            .get(&inst.fixture_type_id)
+            .and_then(|ft| ft.find_mode(&inst.dmx_mode));
+
+        if let Some(mode) = mode {
+            write_attr8(buf, base, mode, "Dimmer",     dimmer_byte);
+            write_attr16(buf, base, mode, "Pan",       pan_raw);
+            write_attr16(buf, base, mode, "Tilt",      tilt_raw);
+            write_attr8(buf, base, mode, "ColorAdd_R", r);
+            write_attr8(buf, base, mode, "ColorAdd_G", g);
+            write_attr8(buf, base, mode, "ColorAdd_B", b);
+        } else {
+            // Generic 8-ch: Dimmer | Pan MSB | Pan Fine | Tilt MSB | Tilt Fine | R | G | B
+            buf.set(base,     dimmer_byte);
+            buf.set(base + 1, (pan_raw >> 8) as u8);
+            buf.set(base + 2, (pan_raw & 0xFF) as u8);
+            buf.set(base + 3, (tilt_raw >> 8) as u8);
+            buf.set(base + 4, (tilt_raw & 0xFF) as u8);
+            buf.set(base + 5, r);
+            buf.set(base + 6, g);
+            buf.set(base + 7, b);
+        }
+    }
+}
+
+/// Write a single 8-bit attribute to the DMX buffer using the GDTF channel offset.
+fn write_attr8(
+    buf: &mut stagelx_core::universe::DmxBuffer,
+    base: u16,
+    mode: &DmxMode,
+    attr: &str,
+    value: u8,
+) {
+    if let Some(ch) = mode.channel_for(attr) {
+        buf.set(base + ch.offset - 1, value);
+    }
+}
+
+/// Write a 16-bit attribute (MSB + optional fine byte) using the GDTF channel offset.
+fn write_attr16(
+    buf: &mut stagelx_core::universe::DmxBuffer,
+    base: u16,
+    mode: &DmxMode,
+    attr: &str,
+    value: u16,
+) {
+    if let Some(ch) = mode.channel_for(attr) {
+        let idx = base + ch.offset - 1;
+        buf.set(idx, (value >> 8) as u8);
+        if ch.resolution >= 2 {
+            buf.set(idx + 1, (value & 0xFF) as u8);
+        }
     }
 }
 
