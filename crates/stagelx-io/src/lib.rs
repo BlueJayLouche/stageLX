@@ -13,6 +13,8 @@ use artnet::{
 };
 use sacn::{SacnState, sacn_manage_socket, sacn_receive, sacn_send};
 use usb::{UsbDmxState, usb_manage_device, usb_send};
+use midi::{MidiState, midi_manage_connection, midi_receive};
+use osc::{OscState, osc_manage_socket, osc_receive};
 use stagelx_dmx::engine::DmxEngine;
 
 /// Art-Net, sACN, and USB DMX output rate.  E1.31 §6.6 recommends ≥ 44 Hz.
@@ -25,7 +27,9 @@ impl Plugin for IoPlugin {
         app.insert_resource(DmxEngineRes(DmxEngine::default()))
             .init_resource::<ArtNetState>()
             .init_resource::<SacnState>()
+            .init_resource::<OscState>()
             .insert_non_send_resource(UsbDmxState::default())
+            .insert_non_send_resource(MidiState::default())
             .insert_resource(Time::<Fixed>::from_hz(DMX_OUTPUT_HZ))
             // Every render frame: manage sockets/devices, drain incoming packets.
             .add_systems(
@@ -34,8 +38,12 @@ impl Plugin for IoPlugin {
                     artnet_manage_socket,
                     sacn_manage_socket,
                     usb_manage_device,
+                    osc_manage_socket,
+                    midi_manage_connection,
                     artnet_receive,
                     sacn_receive,
+                    osc_receive,
+                    midi_receive,
                 )
                     .chain(),
             )

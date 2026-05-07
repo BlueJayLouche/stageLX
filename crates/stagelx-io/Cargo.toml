@@ -12,3 +12,5 @@ bevy              = { workspace = true }
 thiserror         = { workspace = true }
 crossbeam-channel = { workspace = true }
 serialport        = { workspace = true }
+midir             = { workspace = true }
+rosc              = { workspace = true }
