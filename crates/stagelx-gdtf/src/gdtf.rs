@@ -14,6 +14,8 @@ pub struct GdtfFixtureType {
     pub dmx_modes: Vec<DmxMode>,
     pub geometries: Vec<Geometry>,
     pub wheels: Vec<Wheel>,
+    /// Raw bytes of each embedded 3DS model file, keyed by filename (e.g. "models/3ds/Body.3ds").
+    pub models: Vec<(String, Vec<u8>)>,
 }
 
 #[derive(Debug, Clone)]
@@ -235,6 +237,16 @@ pub fn parse_gdtf(data: &[u8]) -> Result<GdtfFixtureType, GdtfError> {
     let cursor = std::io::Cursor::new(data);
     let mut archive = ZipArchive::new(cursor)?;
 
+    // Collect all embedded 3DS model filenames before borrowing description.xml.
+    let model_names: Vec<String> = (0..archive.len())
+        .filter_map(|i| {
+            archive.by_index(i).ok().and_then(|f| {
+                let n = f.name().to_string();
+                if n.starts_with("models/") && n.ends_with(".3ds") { Some(n) } else { None }
+            })
+        })
+        .collect();
+
     let xml_content = {
         let mut file = archive.by_name("description.xml")?;
         let mut content = String::new();
@@ -242,8 +254,20 @@ pub fn parse_gdtf(data: &[u8]) -> Result<GdtfFixtureType, GdtfError> {
         content
     };
 
+    let mut models = Vec::new();
+    for name in model_names {
+        if let Ok(mut file) = archive.by_name(&name) {
+            let mut bytes = Vec::new();
+            if file.read_to_end(&mut bytes).is_ok() {
+                models.push((name, bytes));
+            }
+        }
+    }
+
     let parsed: xml::Gdtf = quick_xml::de::from_str(&xml_content)?;
-    Ok(convert_fixture_type(parsed.fixture_type))
+    let mut ft = convert_fixture_type(parsed.fixture_type);
+    ft.models = models;
+    Ok(ft)
 }
 
 // ─── Conversion helpers ───────────────────────────────────────────────────────
@@ -275,6 +299,7 @@ fn convert_fixture_type(ft: xml::FixtureType) -> GdtfFixtureType {
         dmx_modes,
         geometries,
         wheels,
+        models: Vec::new(), // populated by parse_gdtf after convert_fixture_type returns
     }
 }
 
