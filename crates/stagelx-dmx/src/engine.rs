@@ -1,5 +1,17 @@
+use bevy::prelude::*;
+use std::collections::HashSet;
 use stagelx_core::universe::{DmxBuffer, UniverseSet};
 use crate::merge::MergeStrategy;
+
+/// Bevy Resource wrapper around the DMX engine.
+#[derive(Resource)]
+pub struct DmxEngineRes(pub DmxEngine);
+
+impl Default for DmxEngineRes {
+    fn default() -> Self {
+        Self(DmxEngine::default())
+    }
+}
 
 /// Priority-ordered DMX source.
 #[derive(Debug)]
@@ -17,12 +29,19 @@ pub struct DmxSource {
 pub struct DmxEngine {
     sources: Vec<DmxSource>,
     output: UniverseSet,
+    /// Cached universe IDs — rebuilt only when sources change.
+    cached_universe_ids: Vec<u16>,
+    /// Scratch set for deduplication — reused to avoid per-tick allocation.
+    id_scratch: HashSet<u16>,
+    /// Set to true when a source is added or a universe is modified.
+    dirty: bool,
 }
 
 impl DmxEngine {
     pub fn add_source(&mut self, source: DmxSource) {
         self.sources.push(source);
         self.sources.sort_by_key(|s| s.priority);
+        self.dirty = true;
     }
 
     /// Return an existing source by name, or create it with the given priority/strategy.
@@ -47,15 +66,21 @@ impl DmxEngine {
 
     /// Recompute the output universes from all sources.
     pub fn tick(&mut self) {
-        // Collect universe IDs across all sources
-        let universe_ids: Vec<u16> = self.sources
-            .iter()
-            .flat_map(|s| s.universes.universes().map(|(id, _)| id))
-            .collect::<std::collections::HashSet<_>>()
-            .into_iter()
-            .collect();
+        // Rebuild cached universe IDs only when structurally dirty.
+        if self.dirty {
+            self.cached_universe_ids.clear();
+            self.id_scratch.clear();
+            for source in &self.sources {
+                for (id, _) in source.universes.universes() {
+                    if self.id_scratch.insert(id) {
+                        self.cached_universe_ids.push(id);
+                    }
+                }
+            }
+            self.dirty = false;
+        }
 
-        for uid in universe_ids {
+        for &uid in &self.cached_universe_ids {
             let out = self.output.get_or_insert(uid);
             out.clear();
             for source in &self.sources {

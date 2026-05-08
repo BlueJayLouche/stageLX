@@ -4,5 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-stagelx-core = { workspace = true }
-thiserror    = { workspace = true }
+stagelx-core  = { workspace = true }
+stagelx-state = { workspace = true }
+bevy          = { workspace = true }
+thiserror     = { workspace = true }
