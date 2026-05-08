@@ -283,7 +283,7 @@ Output of a structured Performance vs Architect role-debate. These are binding d
 
 ### Immediate — Before Phase 5 Feature Work
 
-#### 1. Freeze `stagelx-state`
+#### 1. ✅ Freeze `stagelx-state`
 - **Rule:** No new Bevy Resources added to `stagelx-state` in Phase 5.
 - **Rationale:** The crate has become a dependency sink (io + render + ui all import it). Adding MIDI config, viewport state, and export staging here would cement it as a god-crate.
 - **Routing for new state:**
@@ -291,29 +291,22 @@ Output of a structured Performance vs Architect role-debate. These are binding d
   - Viewport layout → `stagelx-render` (`ViewportLayout` Resource)
   - MVR export staging → `stagelx-export` (new module/crate)
 - **Phase 6:** Mechanical extraction of `stagelx-state` → `stagelx-show` (Programmer, future cue stacks) + `stagelx-patch` (PatchRes, Universe routing). Code will already live in the right places; this becomes a Cargo.toml reorganisation.
+- **Done:** Freeze doc comment added to `stagelx-state/src/lib.rs` (commit `fbb7aa5`).
 
-#### 2. Move `to_bevy_buffers()` out of `stagelx-3ds`
-- **Rule:** Format crates (`stagelx-3ds`, `stagelx-gdtf`, future `stagelx-mvr`) must be runtime-agnostic. They expose `Vec<[f32; 3]>`, index buffers, and materials-as-data — no Bevy types.
-- **Action:** Move `to_bevy_buffers()` into `stagelx-render::adapters::three_ds`.
-- **Why now:** Unblocks async AssetLoader path for geometry loading and keeps format crates testable via golden-file fixtures without engine startup.
+#### 2. ✅ Replace `stagelx-3ds` with `ds3`; move Bevy adapter to `stagelx-render`
+- **Rule:** Format crates must be runtime-agnostic. They expose `Vec<[f32; 3]>`, index buffers, and materials-as-data — no Bevy types.
+- **Done (commit `fbb7aa5`):**
+  - Vendored `stagelx-3ds` crate deleted; replaced with `ds3` path dep (`../3ds-rs`). The standalone crate adds smooth normals, transform matrix, material names, smooth groups, full test suite, serde, and no_std support.
+  - `mesh_from_gdtf` moved to `stagelx-render::adapters::three_ds` — the only Bevy-aware geometry adapter.
+  - `stagelx-render` now depends on `ds3` (runtime-agnostic) rather than the old vendored crate.
 
-#### 3. Formalise the IO thread abstraction
+#### 3. ✅ Formalise the IO thread abstraction
 - **Rule:** All IO transports share a common `IoSource` / `IoSink` contract. No per-transport bespoke thread management.
-- **Define in `stagelx-io`:**
-  ```rust
-  trait IoSource {
-      type Msg;
-      fn start(cfg, tx: Sender<Msg>, shutdown: Receiver<()>) -> JoinHandle<Result<()>>;
-  }
-  trait IoSink {
-      type Cmd;
-      fn start(cfg, rx: Receiver<Cmd>, shutdown: Receiver<()>) -> JoinHandle<Result<()>>;
-  }
-  ```
-- **`IoSupervisor` Bevy Resource:** owns thread handles, restart policy, uniform telemetry (drops, latency, last-seen).
-- **Channel spec:** depth 8 per universe (not 256); carries post-merge `[u8; 512]` snapshots, not raw packets.
-- **Socket spec:** `SO_RCVBUF` = 4 MB on UDP sockets.
-- **Runtime:** Stay blocking threads + crossbeam. No tokio — DMX is 44 Hz, MIDI sub-kHz, OSC sparse; async buys nothing here.
+- **Done (commit `fbb7aa5`):**
+  - `IoSource`, `IoSink` traits and `IoSupervisor` Resource defined in `stagelx-io::supervisor`.
+  - Art-Net and sACN RX channel depth reduced from 256 → 8 slots.
+  - MIDI and OSC must implement `IoSource` when wired in Phase 5; existing transports migrate in Phase 6.
+- **Deferred:** `SO_RCVBUF` = 4 MB on UDP sockets (requires `socket2` crate — add when MIDI/OSC land).
 
 ---
 
@@ -324,11 +317,12 @@ Output of a structured Performance vs Architect role-debate. These are binding d
 - Config Resources (`MidiConfig`, `OscConfig`) live in `stagelx-io`, not `stagelx-state`.
 - MIDI/OSC config UI panels source their data from `stagelx-io` Resources.
 
-#### 5. Split-screen viewports
+#### 5. ✅ Split-screen viewports
 - Implement as `render::viewports` module inside `stagelx-render`.
 - `ViewportLayout` Resource in `stagelx-render` (not `stagelx-state`).
 - Do NOT extract to a `stagelx-viewport` crate yet — promote only if `stagelx-ui` needs to drive layout independently.
 - Layout: FOH perspective (¾ width) + top ortho + side ortho.
+- **Done (commit `2dc1d79`):** `FohCamera`, `TopCamera`, `SideCamera` components; `update_viewports_on_resize` system; egui separator lines + TOP/SIDE labels.
 
 #### 6. MVR export
 - `stagelx-mvr`: new format-pure crate (XML document model, no Bevy types).
@@ -452,4 +446,4 @@ Suggested `.gitignore`: standard Rust gitignore + `*.gdtf` test files (large bin
 
 ---
 
-*Last updated: 2026-05-07 — Phase 5 in progress*
+*Last updated: 2026-05-08 — Pre-phase 5 tasks complete; Phase 5 in progress*
