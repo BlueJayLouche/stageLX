@@ -1,4 +1,5 @@
 use bevy::{prelude::*, camera::{ScalingMode, Viewport}, window::WindowResized};
+use crate::camera::FohCameraController;
 
 #[derive(Component)]
 pub struct FohCamera;
@@ -76,7 +77,7 @@ pub fn setup_scene(
             viewport: Some(foh_viewport(w, h)),
             ..default()
         },
-        Transform::from_xyz(0.0, 8.0, 22.0).looking_at(Vec3::new(0.0, 2.0, 0.0), Vec3::Y),
+        FohCameraController::default(),
     ));
 
     // Top-down orthographic camera — right 25%, upper half

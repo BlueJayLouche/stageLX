@@ -397,7 +397,7 @@ Output of a structured Performance vs Architect role-debate. These are binding d
 **Rendering upgrades**
 - [ ] Ray-marched volumetric fog cone in `BeamMaterial` WGSL shader (march view ray through cone volume, accumulate density)
 - [ ] Split-screen viewports: primary FOH perspective (3/4 width) + top ortho + side ortho
-- [ ] Camera orbit/pan for FOH view; fixed orthographic cameras for top/side
+- [x] Camera orbit/pan for FOH view; fixed orthographic cameras for top/side
 
 **Milestone**: Load a real venue GLB, import an MVR with GDTF fixture models, control from a MIDI surface or OSC (TouchDesigner), see volumetric beams in three views simultaneously.
 
@@ -446,4 +446,4 @@ Suggested `.gitignore`: standard Rust gitignore + `*.gdtf` test files (large bin
 
 ---
 
-*Last updated: 2026-05-08 — Pre-phase 5 tasks complete; Phase 5 in progress*
+*Last updated: 2026-05-08 — Camera orbit/pan done; Phase 5 in progress*

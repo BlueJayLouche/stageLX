@@ -1,5 +1,6 @@
 pub mod adapters;
 pub mod beam;
+pub mod camera;
 pub mod fixture;
 pub mod gobo;
 pub mod scene;
@@ -12,6 +13,7 @@ use stagelx_core::{
 };
 use stagelx_state::{FixtureLibraryRes, PatchRes};
 use beam::{BeamMaterial, GoboLibrary, setup_gobos};
+use camera::{foh_camera_input, foh_camera_update};
 use fixture::{FixtureSpawnConfig, spawn_fixture};
 pub use venue::{VenueRoot, VenueLoadState, load_venue};
 
@@ -31,6 +33,8 @@ impl Plugin for StageLxRenderPlugin {
                 Update,
                 (
                     scene::update_viewports_on_resize,
+                    foh_camera_input,
+                    foh_camera_update,
                     fixture::keyboard_programmer,
                     fixture::articulate_fixtures,
                     fixture::articulate_beams,

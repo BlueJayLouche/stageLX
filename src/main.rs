@@ -8,7 +8,7 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
-                title: "stageLX — Phase 4".into(),
+                title: "stageLX — Phase 5".into(),
                 resolution: (1600_u32, 900_u32).into(),
                 ..default()
             }),
@@ -30,4 +30,7 @@ fn print_controls() {
     info!("  X           — Red");
     info!("  C           — Cyan/blue");
     info!("  R/G/B       — Nudge red/green/blue channel up");
+    info!("  Right-drag  — Orbit FOH camera");
+    info!("  Middle-drag — Pan FOH camera");
+    info!("  Scroll      — Zoom FOH camera");
 }
