@@ -376,6 +376,200 @@ Output of a structured Performance vs Architect role-debate. These are binding d
 
 ---
 
+## Phase 5 Mid-Point Audit — 2026-05-08
+
+Output of a parallel Performance + Architect multi-role analysis of the Phase 5 codebase. Violations of previously established rules are flagged. New binding rules (10–22) are added below and supersede any conflicting previous notes.
+
+### Existing Rule Violations
+
+| Rule | Status | Location |
+|---|---|---|
+| Rule 4: `MidiConfig`/`OscConfig` live in `stagelx-io` | **VIOLATED** — both still in `stagelx-state::IoConfig` | `state/src/lib.rs:149–171` |
+| Dependency graph: leaf crates don't depend on each other | **VIOLATED** — `stagelx-ui` imports `stagelx-render::VenueLoadState` | `ui/src/lib.rs:17,108` |
+| Rule 3: `IoSource`/`IoSink` contract; no bespoke thread management | **PARTIAL** — traits defined but no transport implements them; all transports still use ad-hoc `thread::spawn` | `io/src/supervisor.rs` |
+| Rule 9: Emit `IoOverflowWarning` when channel found full | **NOT DONE** — event type missing; `IoSupervisor::rx_drops` never incremented | `io/src/supervisor.rs` |
+
+### New Bindings (Rules 10–22)
+
+#### 10. IO RX threads must use `try_send`, not `send`
+- **Rule:** IO transport RX threads must use `try_send()` on the crossbeam channel. Blocking `send()` stalls the OS receive buffer under load, causing network-level packet loss invisible to the application.
+- **Action:** `artnet.rs:147`, `sacn.rs:194` — change `tx.send(pkt)` → `tx.try_send(pkt)`. On `Err(TrySendError::Full)` increment `IoSupervisor::rx_drops` and continue.
+
+#### 11. No `Arc<Vec<u8>>` on the UDP hot path — use `[u8; 512]`
+- **Rule:** `ReceivedPacket.data` must be a fixed-size `[u8; 512]` array field. The `Arc<Vec<u8>>` pattern causes ~3,200 heap allocations/sec at high universe count with no benefit (data is consumed once and dropped).
+- **Action:** `artnet.rs:141`, `sacn.rs:188`.
+
+#### 12. All IO transport threads must have a shutdown path
+- **Rule:** No transport thread may be permanently leaked when its protocol is disabled. Leaked threads hold bound OS ports, causing `EADDRINUSE` on re-enable.
+- **Action:** `osc.rs:74` — wrap `UdpSocket` in `Arc`, store a clone in `OscState`, call `shutdown(Shutdown::Both)` to unblock `recv_from` on disable. Apply the same pattern to Art-Net/sACN using the `IoSupervisor` shutdown signal once Rule 3 is implemented.
+
+#### 13. No per-frame heap allocation in `Update` or `FixedUpdate` systems
+- **Rule:** ECS systems running at frame rate or the DMX tick rate must not allocate `Vec` or `HashMap` values that are discarded each tick. Use `Local<T>` to persist allocations across frames; rebuild only on structural changes.
+- **Known violations:**
+  - `lod.rs:209` — `Vec<(Entity, f32, BeamLodTier)>` allocated every frame → `Local<Vec<...>>`
+  - `lod.rs:267` — `HashMap<FixtureId, Entity>` allocated every frame → `Local<HashMap<...>>`, rebuilt only on `Added<BeamSprite>` / `RemovedComponents<BeamSprite>`
+  - `engine.rs:51` — `HashSet<u16>` + `Vec<u16>` allocated every 44 Hz tick → cache in `DmxEngine` with a dirty flag
+
+#### 14. `articulate_beams` must gate material writes behind change detection
+- **Rule:** `beam_materials.get_mut(handle.id())` marks the Bevy asset dirty unconditionally, triggering a GPU uniform upload for every fixture every frame. `Mat4::inverse()` must not run for static fixtures. Both must be gated on actual change.
+- **Action:** `render/src/fixture.rs:303–316` — filter on `Changed<GlobalTransform>` and a cached last-programmed value; call `get_mut` only when a change is detected.
+
+#### 15. MIDI port scan must be rate-limited to ≤ 1 Hz
+- **Rule:** `MidiInput::new("stageLX-scan")` invokes platform MIDI subsystem APIs and must not be called in `Update` (60 Hz). Use a `Local<Timer>` or elapsed-time accumulator.
+- **Action:** `io/src/midi.rs:34`.
+
+#### 16. Release profile must enable LTO
+- **Rule:** Workspace `Cargo.toml` must define `[profile.release]` with `lto = "thin"` and `codegen-units = 1`. The `merge_htp`/`merge_ltp` loops in `stagelx-core::universe` are 512-byte SIMD candidates; cross-crate inlining is required for the compiler to vectorize them.
+- **Action:** Add to root `Cargo.toml`. Also add `[profile.dev.package."*"] opt-level = 2` to keep dependencies optimized during development builds.
+
+#### 17. Remove the `tokio` workspace dependency
+- **Rule:** The project correctly uses sync threads + crossbeam. `tokio` is declared in workspace deps but unused by any crate. It adds ~600 KB of compile cost and misleads readers about the runtime model. Do not add tokio.
+- **Action:** Remove `tokio` from `Cargo.toml:27`.
+
+#### 18. LOD tier transitions must use a ±10 px hysteresis band
+- **Rule:** `evaluate_beam_lod` must not flip a fixture's tier on a single frame. Apply a ±10 px band around each threshold: promote when `radius > threshold + 10`, demote only when `radius < threshold - 10`. Prevents per-frame `commands.entity().insert()` churn and visible flickering at tier boundaries.
+- **Action:** `lod.rs:225`. Store previous tier per entity (component or `Local<HashMap<Entity, BeamLodTier>>`).
+
+#### 19. `BeamRenderTarget` must resize on `WindowResized`
+- **Rule:** The half-res beam render target is created once at startup. It must be recreated whenever `WindowResized` fires, parallel to `update_viewports_on_resize`. Stale dimensions on HiDPI displays or after window resize produce incorrect compositing.
+- **Action:** `render/src/lod.rs:84` — add a resize system listening on `EventReader<WindowResized>`.
+
+#### 20. `programmer_to_dmx` belongs in `stagelx-dmx`, not `stagelx-io`
+- **Rule:** Attribute→DMX channel projection is the DMX engine's responsibility. Its current location in `stagelx-io::artnet` is the reason `stagelx-io` has an unnecessary dep on `stagelx-gdtf`. Moving it enables pre-computation of a `DmxChannelMap` at patch load time, eliminating per-tick GDTF `&str` lookups (currently ~22,528 string comparisons/sec at 64 fixtures × 44 Hz).
+- **Action:** Move `artnet.rs:228–306` → `dmx/src/projection.rs`. Add a `DmxChannelMap` cache (`[Option<u16>; 8]` per attribute) to `FixtureInstance`, computed once in `on_fixture_spawned`. Remove `stagelx-gdtf` from `stagelx-io/Cargo.toml`.
+
+#### 21. `VenueLoadState` must move out of `stagelx-render`
+- **Rule:** `VenueLoadState` is application state, not render state. `stagelx-ui` must not import from `stagelx-render` to drive venue-load logic — this is the only inter-leaf dependency in the workspace and directly violates the dependency graph invariant. UI must fire a `LoadVenueEvent` instead of querying render entities directly.
+- **Action:** Move `VenueLoadState` to `stagelx-state`. Update `ui/src/lib.rs:17,108`.
+
+#### 22. `IoConfig` must be split into per-protocol config + stats Resources
+- **Rule:** `IoConfig` currently holds user intent fields and runtime telemetry counters for five protocols in one struct. Every `ResMut<IoConfig>` borrow is exclusive — all five protocol systems compete for it each frame, creating real Bevy scheduler contention. Split into:
+  - Per-protocol `*Config` Resources (user intent: IPs, ports, enabled flags) — owned by UI, written rarely.
+  - Per-protocol `*Stats` Resources (frame counters, status strings) — owned by the IO system, written per-frame.
+  - Config Resources for MIDI and OSC must live in `stagelx-io`, not `stagelx-state` (aligns with Rule 4).
+- **Action:** `state/src/lib.rs:107–219` → split across 5 new files in `io/src/`.
+
+### Prioritized Fix List
+
+Items 1–4 are under 45 minutes combined and must be done before any show call.
+
+| # | Action | Files | Effort |
+|---|---|---|---|
+| 1 | `try_send` in Art-Net/sACN RX threads (Rule 10) | `artnet.rs:147`, `sacn.rs:194` | 30 min |
+| 2 | Fix OSC socket leak on disable (Rule 12) | `osc.rs:74` | 1 h |
+| 3 | Remove `tokio` workspace dep (Rule 17) | `Cargo.toml:27` | 5 min |
+| 4 | Add `[profile.release]` with LTO (Rule 16) | `Cargo.toml` | 5 min |
+| 5 | Split `IoConfig` into per-protocol `*Config` + `*Stats` (Rules 22 + 4) | `state/src/lib.rs:107–219`, IO crates | 1 day |
+| 6 | Gate `articulate_beams` on `Changed<GlobalTransform>` (Rule 14) | `render/src/fixture.rs:303` | 2 h |
+| 7 | `[u8; 512]` on `ReceivedPacket` (Rule 11) | `artnet.rs:141`, `sacn.rs:188` | 30 min |
+| 8 | Move `programmer_to_dmx` to `stagelx-dmx` + `DmxChannelMap` cache (Rule 20) | `artnet.rs:228–306` → `dmx/src/projection.rs` | 4 h |
+| 9 | Move `VenueLoadState` to `stagelx-state` (Rule 21) | `ui/src/lib.rs:17,108` | 1 h |
+| 10 | Implement `IoSource` for Art-Net/sACN/OSC; wire `rx_drops` (Rule 3 + 10) | `supervisor.rs`, transports | 1 day |
+| 11 | `Local<Vec>` + `Local<HashMap>` in LOD systems (Rule 13) | `lod.rs:209`, `lod.rs:267` | 2 h |
+| 12 | Cache universe ID list in `DmxEngine` with dirty flag (Rule 13) | `engine.rs:51` | 1 h |
+| 13 | LOD hysteresis ±10 px (Rule 18) | `lod.rs:225` | 1 h |
+| 14 | Resize `BeamRenderTarget` on `WindowResized` (Rule 19) | `lod.rs:84` | 1 h |
+| 15 | Rate-limit MIDI port scan to 1 Hz (Rule 15) | `midi.rs:34` | 15 min |
+
+---
+
+## Phase 5 Mid-Point Audit — Frontend UI Review — 2026-05-08
+
+Output of a Frontend role analysis comparing the live `stagelx-ui` implementation against the `design_handoff_stagelx_ui` brief (JSX prototype + `tokens.css`). Violations and regressions are binding fixes for Phase 5 completion.
+
+### Panel Scores vs. Design Brief
+
+| Panel | Score | Primary blocker |
+|---|---:|---|
+| Layout shell + top bar | 72 | Status bar defaults off; viewport borders via `painter.line_segment` not layout primitives |
+| Programmer | 68 | Fixture names always `"—"`; fader/encoder font sizes wrong; strobe Hz display bug |
+| Patch | 62 | Search field double-renders; `ComboBox` id collision; live dot absent; shift-range select stub |
+| DMX I/O | 58 | TX/RX counter always reads Art-Net data regardless of active protocol; MIDI CCs read-only |
+| Library | 55 | Search input aliases GDTF import path (functional regression); tab active border wrong edge |
+
+**Overall completeness: ~56 / 100. Visual token fidelity: ~85 %. Atom coverage: 8 / 11 (4 of 8 partial).**
+
+### Priority 1 — Functional Regressions (must fix before Phase 5 milestone)
+
+| # | Issue | Location |
+|---|---|---|
+| R1 | `res.import_path` used as Library search query — typing in search overwrites the GDTF load path | `library.rs:132` |
+| R2 | Both Add-Fixture `ComboBox::from_label("")` share the same egui id — Type combo broken | `patch.rs:302,320` |
+| R3 | TX/RX counter always reads `artnet_tx_count`/`artnet_rx_count` even when MIDI/OSC is active | `io_panel.rs:112,122` |
+| R4 | `UiLayoutState::show_status_bar` defaults `false` — status bar invisible by default; spec requires always-on | `lib.rs:42,204` |
+| R5 | Programmer selection bar fixture names always `"—"` — `PatchRes` not passed through | `programmer.rs:68` |
+
+### Priority 2 — Spec Violations (visual fidelity)
+
+| # | Issue | Location |
+|---|---|---|
+| V1 | Encoder hub readout uses `TextStyle::Body` — spec requires `FontId::monospace(18.0)` | `widgets.rs:521` |
+| V2 | Fader fill is flat `accent * 0.8` — spec requires two-stop gradient mesh (`ACCENT → FADER_GRADIENT_BOTTOM`) | `widgets.rs:380` |
+| V3 | Library tab active border drawn at `rect.min.y` (top) — spec requires `rect.max.y - 1.0` (bottom) | `library.rs:89` |
+| V4 | Patch search is custom painted rect + overlapping `TextEdit` — double-renders, must be single widget | `patch.rs:60–75` |
+| V5 | Colour active-row name hardcoded `"Custom"` — should match nearest preset name | `programmer.rs:163` |
+| V6 | Minimize button wired in `panel_titlebar()` but docked rail headers don't call it — minimize unreachable from UI | `lib.rs:238–248` |
+| V7 | Background neutrals (`BG_APP`, `BG_CHROME`) converted slightly too dark from oklch — depth contrast flatter than intended | `theme.rs` |
+| V8 | Encoder/fader readout not calling monospace font — renders in proportional font at default body size | `widgets.rs:336,521` |
+
+### Priority 3 — Missing Components
+
+- Shift-click range select (stub only, no range computation) — `patch.rs:152`
+- Live/idle `StatusDot` per fixture row in Patch list
+- `dropzone()` Browse button must be inside the allocated rect, not below it — `widgets.rs:603–607`
+- USB serial port enumeration chevron button — `io_panel.rs` USB section
+- Protocol strip status dots read from hardcoded `DotState` instead of `IoConfig` live fields — `io_panel.rs:62`
+- MIDI CC cells are read-only; Learn button is a TODO — `io_panel.rs` MIDI section
+- PICK button absent from Colour active row — `programmer.rs:~170`
+- `PanelChrome` shadow (`Frame::shadow`) not applied to any floating panel
+- Detach/minimize icons are unicode fallbacks (`"⛶"` / `"━"`), not the spec SVG glyphs
+
+### New Bindings (Rules 23–28)
+
+#### 23. Library search query must be independent of the import path field
+- **Rule:** The Library panel must maintain a separate `search_query` string in `ui.ctx().data_mut()` temp storage (keyed by a stable `egui::Id`). It must never alias `FixtureLibraryRes::import_path` or any other Resource field.
+- **Action:** `library.rs:132`.
+
+#### 24. All `ComboBox` widgets must have unique egui ids
+- **Rule:** `egui::ComboBox::from_label("")` may not be used more than once in the same UI scope. Use `from_id_salt(unique_key)` or `from_label("unique visible label")`. Duplicate ids cause silent widget corruption.
+- **Action:** `patch.rs:302,320` — change second to `ComboBox::from_id_salt("mode_combo")`.
+
+#### 25. TX/RX counter must reflect the active protocol
+- **Rule:** The IO panel TX/RX counter card must read counters from the Resource matching `IoState::active_protocol`, not always Art-Net. After the IoConfig split (Rule 22), each `*Stats` Resource provides its own counters.
+- **Action:** `io_panel.rs:112,122`.
+
+#### 26. `UiLayoutState::show_status_bar` must default to `true`
+- **Rule:** The status bar is always visible per the design brief. Implement `Default` manually for `UiLayoutState` (do not use `#[derive(Default)]`) and set `show_status_bar: true`.
+- **Action:** `lib.rs:42`.
+
+#### 27. Fixture names must be resolved from `PatchRes` in the programmer selection bar
+- **Rule:** The programmer panel must receive a reference to `PatchRes` and look up `FixtureInstance::name` for each selected id. Display as `"Name · Name · Name"` with a `"N/M"` count suffix. `"—"` is only shown when the selection is empty.
+- **Action:** `programmer.rs:68`. Thread `patch: &PatchRes` through `programmer_panel_docked`.
+
+#### 28. Encoder and fader readouts must use the spec font sizes
+- **Rule:** Encoder hub value text must use `egui::FontId::monospace(18.0)`. Fader readout text must use `egui::FontId::monospace(14.0)`. Neither may fall back to `TextStyle::Body`.
+- **Action:** `widgets.rs:521` (encoder), `widgets.rs:336` (fader).
+
+### Frontend Fix Sequence (ordered)
+
+| # | Regression/Rule | Files | Effort |
+|---|---|---|---|
+| 1 | R4 — status bar default true (Rule 26) | `lib.rs:42` | 10 min |
+| 2 | R2 — ComboBox id collision (Rule 24) | `patch.rs:302,320` | 5 min |
+| 3 | R1 — Library search aliases import path (Rule 23) | `library.rs:132` | 30 min |
+| 4 | R5 — Fixture names in programmer bar (Rule 27) | `programmer.rs:68`, `lib.rs` call site | 45 min |
+| 5 | R3 — TX/RX counter active protocol (Rule 25) | `io_panel.rs:112,122` | 30 min |
+| 6 | V3 — Library tab border wrong edge | `library.rs:89` | 5 min |
+| 7 | V4 — Patch search double-render | `patch.rs:60–75` | 30 min |
+| 8 | V8 — Encoder/fader monospace font (Rule 28) | `widgets.rs:336,521` | 20 min |
+| 9 | V2 — Fader gradient fill | `widgets.rs:380` | 1 h |
+| 10 | V6 — Wire minimize button in docked rail headers | `lib.rs:238–248,264–272` | 30 min |
+| 11 | P3 — Protocol strip dots from `IoConfig` | `io_panel.rs:62` | 30 min |
+| 12 | P3 — `dropzone()` Browse button inside rect | `widgets.rs:603–607` | 30 min |
+| 13 | P3 — Shift-click range select | `patch.rs:152` | 1 h |
+
+---
+
 ### Phase 5 — Geometry, I/O Surfaces + Advanced Rendering (Weeks 17–20)
 **Goal**: Real fixture/venue geometry, full input surface coverage, professional rendering.
 
@@ -450,4 +644,4 @@ Suggested `.gitignore`: standard Rust gitignore + `*.gdtf` test files (large bin
 
 ---
 
-*Last updated: 2026-05-08 — Volumetric beam LOD system done; Phase 5 in progress*
+*Last updated: 2026-05-08 — Phase 5 mid-point audit complete; frontend UI review complete; Rules 10–28 added*
