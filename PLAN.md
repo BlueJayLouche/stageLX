@@ -552,21 +552,34 @@ Output of a Frontend role analysis comparing the live `stagelx-ui` implementatio
 
 ### Frontend Fix Sequence (ordered)
 
-| # | Regression/Rule | Files | Effort |
-|---|---|---|---|
-| 1 | R4 — status bar default true (Rule 26) | `lib.rs:42` | 10 min |
-| 2 | R2 — ComboBox id collision (Rule 24) | `patch.rs:302,320` | 5 min |
-| 3 | R1 — Library search aliases import path (Rule 23) | `library.rs:132` | 30 min |
-| 4 | R5 — Fixture names in programmer bar (Rule 27) | `programmer.rs:68`, `lib.rs` call site | 45 min |
-| 5 | R3 — TX/RX counter active protocol (Rule 25) | `io_panel.rs:112,122` | 30 min |
-| 6 | V3 — Library tab border wrong edge | `library.rs:89` | 5 min |
-| 7 | V4 — Patch search double-render | `patch.rs:60–75` | 30 min |
-| 8 | V8 — Encoder/fader monospace font (Rule 28) | `widgets.rs:336,521` | 20 min |
-| 9 | V2 — Fader gradient fill | `widgets.rs:380` | 1 h |
-| 10 | V6 — Wire minimize button in docked rail headers | `lib.rs:238–248,264–272` | 30 min |
-| 11 | P3 — Protocol strip dots from `IoConfig` | `io_panel.rs:62` | 30 min |
-| 12 | P3 — `dropzone()` Browse button inside rect | `widgets.rs:603–607` | 30 min |
-| 13 | P3 — Shift-click range select | `patch.rs:152` | 1 h |
+| # | Regression/Rule | Files | Effort | Status |
+|---|---|---|---|---|
+| 1 | R4 — status bar default true (Rule 26) | `lib.rs:42` | 10 min | ✅ Done |
+| 2 | R2 — ComboBox id collision (Rule 24) | `patch.rs:302,320` | 5 min | ✅ Done |
+| 3 | R1 — Library search aliases import path (Rule 23) | `library.rs:132` | 30 min | ✅ Done |
+| 4 | R5 — Fixture names in programmer bar (Rule 27) | `programmer.rs:68`, `lib.rs` call site | 45 min | ✅ Done |
+| 5 | R3 — TX/RX counter active protocol (Rule 25) | `io_panel.rs:112,122` | 30 min | ✅ Done |
+| 6 | V3 — Library tab border wrong edge | `library.rs:89` | 5 min | ✅ Done |
+| 7 | V4 — Patch search double-render | `patch.rs:60–75` | 30 min | ✅ Done |
+| 8 | V8 — Encoder/fader monospace font (Rule 28) | `widgets.rs:336,521` | 20 min | ✅ Done |
+| 9 | V2 — Fader gradient fill | `widgets.rs:380` | 1 h | ✅ Done |
+| 10 | V6 — Wire minimize button in docked rail headers | `lib.rs:238–248,264–272` | 30 min | ✅ Done |
+| 11 | P3 — Protocol strip dots from `IoConfig` | `io_panel.rs:62` | 30 min | ✅ Done |
+| 12 | P3 — `dropzone()` Browse button inside rect | `widgets.rs:603–607` | 30 min | ✅ Done (`widgets.rs`); library inline dropzones still use out-of-rect buttons — **in progress** |
+| 13 | P3 — Shift-click range select | `patch.rs:152` | 1 h | ✅ Done |
+
+### Remaining Open Items (post-audit)
+
+| # | Item | Location | Rule | Status |
+|---|---|---|---|---|
+| A | Library GDTF/MVR/Venue inline dropzones place Browse outside allocated rect — replace with `widgets::dropzone()` | `library.rs:195–238, 287–315, 361–397` | P3 | ✅ Done |
+| B | `library.rs` directly imports `stagelx_render::{VenueRoot, load_venue}` — add `LoadVenueEvent` to break cross-leaf dep | `library.rs:4`, `lib.rs:117` | Rule 21 | ✅ Done — `LoadVenueEvent` added to `stagelx-state`; render observer in `stagelx-render::on_load_venue` |
+| C | Floating panels missing `Frame::shadow` | `lib.rs:497–545` | P3 | ✅ Done |
+| D | Detach/minimize icons are unicode fallbacks (`"⛶"` / `"━"`) | `lib.rs`, `widgets.rs` | P3 (cosmetic) | ✅ Done — painter-drawn corners-out + bar glyphs |
+| E | Compiler warnings cleanup (unused vars, dead assignments, unused imports) | multiple | warnings | ✅ Done |
+| F | `allocate_ui_at_rect` deprecated → `allocate_new_ui` (~13 call sites across all panels) | `lib.rs`, `programmer.rs`, `io_panel.rs`, `widgets.rs` | deprecation | ✅ Done |
+
+*Last updated: 2026-05-08 — All P1/P2/P3 audit items done (A–F); Rule 21 resolved via LoadVenueEvent; workspace builds clean with zero errors and zero warnings.*
 
 ---
 
