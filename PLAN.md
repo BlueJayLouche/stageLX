@@ -275,6 +275,111 @@ MVR files extend this with scene context:
 
 ---
 
+## Architecture & Performance Decisions (Pre–Phase 5 Findings)
+
+Output of a structured Performance vs Architect role-debate. These are binding design rules for Phase 5 and beyond.
+
+---
+
+### Immediate — Before Phase 5 Feature Work
+
+#### 1. Freeze `stagelx-state`
+- **Rule:** No new Bevy Resources added to `stagelx-state` in Phase 5.
+- **Rationale:** The crate has become a dependency sink (io + render + ui all import it). Adding MIDI config, viewport state, and export staging here would cement it as a god-crate.
+- **Routing for new state:**
+  - MIDI/OSC config → `stagelx-io`
+  - Viewport layout → `stagelx-render` (`ViewportLayout` Resource)
+  - MVR export staging → `stagelx-export` (new module/crate)
+- **Phase 6:** Mechanical extraction of `stagelx-state` → `stagelx-show` (Programmer, future cue stacks) + `stagelx-patch` (PatchRes, Universe routing). Code will already live in the right places; this becomes a Cargo.toml reorganisation.
+
+#### 2. Move `to_bevy_buffers()` out of `stagelx-3ds`
+- **Rule:** Format crates (`stagelx-3ds`, `stagelx-gdtf`, future `stagelx-mvr`) must be runtime-agnostic. They expose `Vec<[f32; 3]>`, index buffers, and materials-as-data — no Bevy types.
+- **Action:** Move `to_bevy_buffers()` into `stagelx-render::adapters::three_ds`.
+- **Why now:** Unblocks async AssetLoader path for geometry loading and keeps format crates testable via golden-file fixtures without engine startup.
+
+#### 3. Formalise the IO thread abstraction
+- **Rule:** All IO transports share a common `IoSource` / `IoSink` contract. No per-transport bespoke thread management.
+- **Define in `stagelx-io`:**
+  ```rust
+  trait IoSource {
+      type Msg;
+      fn start(cfg, tx: Sender<Msg>, shutdown: Receiver<()>) -> JoinHandle<Result<()>>;
+  }
+  trait IoSink {
+      type Cmd;
+      fn start(cfg, rx: Receiver<Cmd>, shutdown: Receiver<()>) -> JoinHandle<Result<()>>;
+  }
+  ```
+- **`IoSupervisor` Bevy Resource:** owns thread handles, restart policy, uniform telemetry (drops, latency, last-seen).
+- **Channel spec:** depth 8 per universe (not 256); carries post-merge `[u8; 512]` snapshots, not raw packets.
+- **Socket spec:** `SO_RCVBUF` = 4 MB on UDP sockets.
+- **Runtime:** Stay blocking threads + crossbeam. No tokio — DMX is 44 Hz, MIDI sub-kHz, OSC sparse; async buys nothing here.
+
+---
+
+### Phase 5 Implementation Rules
+
+#### 4. MIDI & OSC input
+- Implement `IoSource` trait — MIDI callback → crossbeam → Bevy Messages, OSC UDP → crossbeam → Bevy Messages.
+- Config Resources (`MidiConfig`, `OscConfig`) live in `stagelx-io`, not `stagelx-state`.
+- MIDI/OSC config UI panels source their data from `stagelx-io` Resources.
+
+#### 5. Split-screen viewports
+- Implement as `render::viewports` module inside `stagelx-render`.
+- `ViewportLayout` Resource in `stagelx-render` (not `stagelx-state`).
+- Do NOT extract to a `stagelx-viewport` crate yet — promote only if `stagelx-ui` needs to drive layout independently.
+- Layout: FOH perspective (¾ width) + top ortho + side ortho.
+
+#### 6. MVR export
+- `stagelx-mvr`: new format-pure crate (XML document model, no Bevy types).
+- `stagelx-export`: orchestration module/crate that depends on `stagelx-mvr` + domain crates. This is where the domain→format projection lives.
+- Does not depend on `stagelx-state`.
+
+#### 7. Volumetric beam rendering — three-tier LOD
+- Implement in `stagelx-render::lod` module. Not a new crate.
+- LOD tiers evaluated per-frame by screen-space projected radius:
+  - **Tier 0** (<50 px): billboard sprite — zero ray-march cost.
+  - **Tier 1** (50–200 px): half-res offscreen (960×540), 16 ray-march steps, bilinear upsample + composite.
+  - **Tier 2** (>200 px): full-res, hard cap 32 steps. 64+ steps reserved for single selected "hero" fixture only.
+- **Hard cap:** 64 simultaneous ray-marched beams regardless of patch size. Remaining fixtures render Tier 0 until screen coverage qualifies them.
+- **Lighting:** Enable `ClusteredForward` explicitly in `stagelx-render` pipeline. Reduces 500 point lights to ~4–8 per fragment per tile.
+- **Blending:** Sort beam cones front-to-back within additive tier (preserves early-z on opaque venue geometry).
+- **Target:** Beam pass ≤ 6 ms GPU at 500 fixtures, 1080p worst-case camera. Overdraw ≤ 8× framebuffer-averaged (wgpu timestamp queries).
+
+#### 8. GDTF geometry loading — async + streaming
+- Drive 3DS parsing + Mesh construction through Bevy's async `AssetLoader` (task pool, not render thread).
+- **Deduplication:** Cache `Handle<Mesh>` by `(gdtf_uuid, sub_mesh_index)`. 500 fixtures across 50 unique models = 30–50 uploads, not 500.
+- **Streaming:** Process ≤ 10 unique models per frame during patch load. 50 models = 5 frames ≈ 83 ms — invisible progressive geometry appearance.
+- **Polygon budget:** Reject/simplify any 3DS sub-mesh >8k triangles via `meshopt_simplify` at import time.
+- **Targets:** Main thread never exceeds 20 ms during patch load. Total load <2s wall-clock for 500 fixtures. GPU geometry memory ≤ 128 MB total.
+
+#### 9. DMX tick — non-blocking IO contract
+- `FixedUpdate` DMX tick uses `try_recv()` exclusively — never blocks waiting for channel data.
+- On empty channel: hold last known universe snapshot (correct DMX hold-last behaviour).
+- Emit `IoOverflowWarning` Bevy event if channel found full on 3+ consecutive `try_send()` calls (surface in IO panel UI).
+
+---
+
+### ECS Lifecycle Rule
+
+- **Observers** (`On<SpawnFixtureEvent>`, `On<DespawnFixtureEvent>`): use for one-shot lifecycle work (spawn child entities, set initial transforms, attach geometry).
+- **ECS query systems with explicit `SystemSet` ordering**: use for steady-state per-frame updates (`DmxIngest → DmxMerge → FixtureApply → Render`). Do not use observers for per-frame attribute updates.
+
+---
+
+### Success Metrics
+
+| Domain | Target |
+|--------|--------|
+| Beam GPU pass | ≤ 6 ms at 500 fixtures, 1080p worst-case |
+| Framebuffer overdraw | ≤ 8× averaged (wgpu timestamp queries) |
+| DMX tick jitter | ≤ 1 ms std-dev over 10k ticks |
+| IO snapshot staleness | 0 occurrences > 100 ms under 10× Art-Net flood |
+| Patch load frame time | ≤ 20 ms main thread throughout |
+| Patch load total | < 2 s wall-clock for 500 fixtures / 50 models |
+| GPU geometry memory | ≤ 128 MB for 500-fixture rig |
+| `stagelx-state` growth | 0 new Resources added in Phase 5 |
+
 ---
 
 ### Phase 5 — Geometry, I/O Surfaces + Advanced Rendering (Weeks 17–20)
