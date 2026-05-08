@@ -3,7 +3,7 @@ use bevy_egui::egui::{self, Color32, Pos2, Rect, RichText, Sense, Stroke, Stroke
 
 use crate::theme::*;
 use crate::widgets;
-use crate::PatchSelection;
+use crate::{PatchRes, PatchSelection};
 use stagelx_state::Programmer;
 
 // Legacy entry point (no longer registered as a system, kept for API compat)
@@ -19,6 +19,7 @@ pub fn programmer_panel_docked(
     ui: &mut Ui,
     prog: &mut Programmer,
     patch_sel: &PatchSelection,
+    patch: &PatchRes,
 ) {
     let available_width = ui.available_width();
     ui.set_min_width(available_width);
@@ -61,11 +62,20 @@ pub fn programmer_panel_docked(
             ).size().x;
             cursor_x += ids_width + 10.0;
 
-            // Names (placeholder)
+            // Fixture names, sorted by id for stable ordering
+            let mut named: Vec<(u32, &str)> = patch_sel.selected_ids.iter()
+                .filter_map(|id| patch.0.get(*id).map(|f| (id.0, f.name.as_str())))
+                .collect();
+            named.sort_by_key(|(id, _)| *id);
+            let names_text = if named.is_empty() {
+                "—".to_string()
+            } else {
+                named.iter().map(|(_, n)| *n).collect::<Vec<_>>().join(" · ")
+            };
             painter.text(
                 Pos2::new(cursor_x, center_y),
                 egui::Align2::LEFT_CENTER,
-                "—",
+                &names_text,
                 egui::TextStyle::Body.resolve(ui.style()),
                 FG_MUTED,
             );
@@ -127,6 +137,25 @@ pub fn programmer_panel_docked(
     ui.add_space(14.0);
 
     // ── Colour ────────────────────────────────────────────────────────────────
+    let color_presets: &[(&str, [f32; 3])] = &[
+        ("White",   [1.0, 1.0, 1.0]),
+        ("Red",     [1.0, 0.0, 0.0]),
+        ("Amber",   [1.0, 0.55, 0.0]),
+        ("Green",   [0.0, 1.0, 0.0]),
+        ("Cyan",    [0.0, 0.9, 1.0]),
+        ("Blue",    [0.0, 0.3, 1.0]),
+        ("Magenta", [1.0, 0.0, 0.8]),
+        ("UV",      [0.2, 0.0, 1.0]),
+    ];
+    let preset_name = color_presets.iter()
+        .find(|(_, c)| {
+            (prog.color[0] - c[0]).abs() < 0.01
+                && (prog.color[1] - c[1]).abs() < 0.01
+                && (prog.color[2] - c[2]).abs() < 0.01
+        })
+        .map(|(name, _)| *name)
+        .unwrap_or("Custom");
+
     ui.horizontal(|ui| {
         widgets::eyebrow_widget(ui, "Colour");
         ui.label(hint_secondary("RGB · 8-bit"));
@@ -157,7 +186,7 @@ pub fn programmer_panel_docked(
             painter.text(
                 Pos2::new(rect.min.x + 38.0, rect.center().y - 4.0),
                 egui::Align2::LEFT_CENTER,
-                "Custom",
+                preset_name,
                 egui::TextStyle::Body.resolve(ui.style()),
                 FG,
             );
@@ -169,20 +198,24 @@ pub fn programmer_panel_docked(
                 FG_MUTED,
             );
         }
+        let pick_rect = egui::Rect::from_min_size(
+            egui::Pos2::new(rect.max.x - 48.0, rect.center().y - 11.0),
+            egui::Vec2::new(40.0, 22.0),
+        );
+        let mut pick_clicked = false;
+        ui.allocate_ui_at_rect(pick_rect, |ui| {
+            if ui.add_sized([40.0, 22.0], egui::Button::new(RichText::new("PICK").size(9.0).color(FG_SECONDARY)).fill(BG_RAISED).stroke(Stroke::new(1.0, BORDER))).clicked() {
+                pick_clicked = true;
+            }
+        });
+        if pick_clicked {
+            // TODO: open colour picker popover
+        }
         ui.add_space(8.0);
     }
 
-    // Swatch grid
-    let colors = [
-        ("White", [1.0f32, 1.0, 1.0]),
-        ("Red", [1.0, 0.0, 0.0]),
-        ("Amber", [1.0, 0.55, 0.0]),
-        ("Green", [0.0, 1.0, 0.0]),
-        ("Cyan", [0.0, 0.9, 1.0]),
-        ("Blue", [0.0, 0.3, 1.0]),
-        ("Magenta", [1.0, 0.0, 0.8]),
-        ("UV", [0.2, 0.0, 1.0]),
-    ];
+    // Swatch grid — reuses color_presets defined above
+    let colors = color_presets;
 
     let mut selected_swatch = None;
     for (i, (name, color)) in colors.iter().enumerate() {

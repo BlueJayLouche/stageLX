@@ -5,8 +5,8 @@ use bevy_egui::egui::{Color32, RichText};
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // ── Surfaces ───────────────────────────────────────────────────────────────────
-pub const BG_APP: Color32 = Color32::from_rgb(7, 8, 10); // oklch(0.135 0.004 240)
-pub const BG_CHROME: Color32 = Color32::from_rgb(13, 15, 16); // oklch(0.165 0.004 240)
+pub const BG_APP: Color32 = Color32::from_rgb(11, 13, 17); // oklch(0.135 0.004 240)
+pub const BG_CHROME: Color32 = Color32::from_rgb(19, 22, 26); // oklch(0.165 0.004 240)
 pub const BG_PANEL: Color32 = Color32::from_rgb(18, 20, 22); // oklch(0.190 0.005 240)
 pub const BG_RAISED: Color32 = Color32::from_rgb(26, 28, 30); // oklch(0.225 0.005 240)
 pub const BG_INPUT: Color32 = Color32::from_rgb(10, 11, 13); // oklch(0.150 0.004 240)

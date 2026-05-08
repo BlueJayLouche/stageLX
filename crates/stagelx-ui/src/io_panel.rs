@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_egui::egui::{self, Color32, Pos2, RichText, Sense, Stroke, StrokeKind, Ui, Vec2};
+use bevy_egui::egui::{self, Color32, Pos2, Rect, RichText, Sense, Stroke, StrokeKind, Ui, Vec2};
 
 use crate::theme::*;
 use crate::widgets;
@@ -52,11 +52,11 @@ pub fn io_panel_docked(
                         painter.rect_stroke(cell_rect, 2.0, Stroke::new(1.0, if active { ACCENT_DIM } else { Color32::TRANSPARENT }), StrokeKind::Middle);
 
                         let status = match proto {
-                            ActiveProtocol::ArtNet => widgets::DotState::Live,
-                            ActiveProtocol::Sacn => widgets::DotState::Live,
-                            ActiveProtocol::Usb => widgets::DotState::Warn,
-                            ActiveProtocol::Midi => widgets::DotState::Idle,
-                            ActiveProtocol::Osc => widgets::DotState::Live,
+                            ActiveProtocol::ArtNet => status_to_dot(&cfg.artnet_status),
+                            ActiveProtocol::Sacn   => status_to_dot(&cfg.sacn_status),
+                            ActiveProtocol::Usb    => status_to_dot(&cfg.usb_status),
+                            ActiveProtocol::Midi   => status_to_dot(&cfg.midi_status),
+                            ActiveProtocol::Osc    => status_to_dot(&cfg.osc_status),
                         };
                         let dot_y = cell_rect.min.y + 10.0;
                         painter.circle_filled(Pos2::new(cell_rect.center().x, dot_y), 3.0, status.color());
@@ -89,6 +89,14 @@ pub fn io_panel_docked(
     }
 
     // ── TX/RX counters ────────────────────────────────────────────────────────
+    let (tx_count, rx_count) = match state.active_protocol {
+        ActiveProtocol::ArtNet => (cfg.artnet_tx_count, cfg.artnet_rx_count),
+        ActiveProtocol::Sacn   => (cfg.sacn_tx_count,   cfg.sacn_rx_count),
+        ActiveProtocol::Usb    => (cfg.usb_tx_count,    0),
+        ActiveProtocol::Midi   => (0,                   cfg.midi_rx_count),
+        ActiveProtocol::Osc    => (0,                   cfg.osc_rx_count),
+    };
+
     ui.add_space(12.0);
     {
         let card_height = 72.0;
@@ -109,7 +117,7 @@ pub fn io_panel_docked(
                         widgets::status_dot(ui, widgets::DotState::Tx);
                         ui.label(RichText::new("TX").size(9.0).strong().color(FG_MUTED).monospace());
                     });
-                    ui.label(RichText::new(format!("{}", cfg.artnet_tx_count)).size(16.0).monospace().color(FG));
+                    ui.label(RichText::new(format!("{}", tx_count)).size(16.0).monospace().color(FG));
                     ui.label(RichText::new("packets/s").size(9.0).monospace().color(FG_FAINT));
                 });
 
@@ -119,7 +127,7 @@ pub fn io_panel_docked(
                         widgets::status_dot(ui, widgets::DotState::Live);
                         ui.label(RichText::new("RX").size(9.0).strong().color(FG_MUTED).monospace());
                     });
-                    ui.label(RichText::new(format!("{}", cfg.artnet_rx_count)).size(16.0).monospace().color(FG));
+                    ui.label(RichText::new(format!("{}", rx_count)).size(16.0).monospace().color(FG));
                     ui.label(RichText::new("packets/s").size(9.0).monospace().color(FG_FAINT));
                 });
             });
@@ -130,6 +138,16 @@ pub fn io_panel_docked(
 // ═══════════════════════════════════════════════════════════════════════════════
 // Per-protocol configs
 // ═══════════════════════════════════════════════════════════════════════════════
+
+fn status_to_dot(s: &str) -> widgets::DotState {
+    if s.contains("bound") || s.contains("TX") || s.contains("listening") {
+        widgets::DotState::Live
+    } else if s.contains("busy") || s.contains("error") || s.contains("warn") {
+        widgets::DotState::Warn
+    } else {
+        widgets::DotState::Idle
+    }
+}
 
 fn config_row(ui: &mut Ui, label: &str, content: impl FnOnce(&mut Ui)) {
     ui.horizontal(|ui| {
@@ -197,7 +215,10 @@ fn usb_config(ui: &mut Ui, cfg: &mut IoConfig) {
         cfg.usb_tx_enabled = en;
     });
     config_row(ui, "Port", |ui| {
-        ui.add_sized([160.0, 24.0], egui::TextEdit::singleline(&mut cfg.usb_port).hint_text("/dev/tty.usbserial-…").text_color(FG));
+        ui.add_sized([130.0, 24.0], egui::TextEdit::singleline(&mut cfg.usb_port).hint_text("/dev/tty.usbserial-…").text_color(FG));
+        if ui.add_sized([24.0, 24.0], egui::Button::new("▾").fill(BG_RAISED).stroke(Stroke::new(1.0, BORDER))).on_hover_text("Enumerate serial ports").clicked() {
+            // TODO: populate usb_port from serialport::available_ports() via IoSupervisor
+        }
     });
     config_row(ui, "Universe", |ui| {
         ui.add(egui::DragValue::new(&mut cfg.usb_universe).range(1_u16..=32767_u16));
@@ -242,28 +263,28 @@ fn midi_config(ui: &mut Ui, cfg: &mut IoConfig) {
     ui.columns(2, |cols| {
         for (i, (label, val)) in ccs.iter_mut().enumerate() {
             let col = if i % 2 == 0 { &mut cols[0] } else { &mut cols[1] };
-            col.horizontal(|ui| {
-                let row_width = ui.available_width();
-                let (rect, _response) = ui.allocate_exact_size(Vec2::new(row_width, 24.0), Sense::hover());
-                if ui.is_rect_visible(rect) {
-                    let painter = ui.painter();
-                    painter.rect_filled(rect, 2.0, BG_INPUT);
-                    painter.rect_stroke(rect, 2.0, Stroke::new(1.0, BORDER_SOFT), StrokeKind::Middle);
-                    painter.text(
-                        Pos2::new(rect.min.x + 8.0, rect.center().y),
-                        egui::Align2::LEFT_CENTER,
-                        *label,
-                        egui::TextStyle::Body.resolve(ui.style()),
-                        FG_SECONDARY,
-                    );
-                    painter.text(
-                        Pos2::new(rect.max.x - 8.0, rect.center().y),
-                        egui::Align2::RIGHT_CENTER,
-                        &format!("CC {:03}", **val),
-                        egui::TextStyle::Body.resolve(ui.style()),
-                        FG,
-                    );
-                }
+            let row_width = col.available_width();
+            let (rect, _) = col.allocate_exact_size(Vec2::new(row_width, 24.0), Sense::hover());
+            if col.is_rect_visible(rect) {
+                let painter = col.painter();
+                painter.rect_filled(rect, 2.0, BG_INPUT);
+                painter.rect_stroke(rect, 2.0, Stroke::new(1.0, BORDER_SOFT), StrokeKind::Middle);
+                painter.text(
+                    Pos2::new(rect.min.x + 6.0, rect.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    *label,
+                    egui::FontId::monospace(10.0),
+                    FG_SECONDARY,
+                );
+            }
+            // DragValue in right sub-rect — explicit size avoids negative-width in tight columns
+            let dv_w = (row_width - 50.0).clamp(28.0, 54.0);
+            let dv_rect = Rect::from_min_size(
+                Pos2::new(rect.max.x - dv_w - 4.0, rect.min.y + 2.0),
+                Vec2::new(dv_w, 20.0),
+            );
+            col.allocate_ui_at_rect(dv_rect, |ui| {
+                ui.add(egui::DragValue::new(*val).range(0_u8..=127_u8));
             });
             col.add_space(4.0);
         }

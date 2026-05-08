@@ -327,7 +327,7 @@ impl<'a> Widget for Fader<'a> {
             let painter = ui.painter();
             let center_x = rect.center().x;
 
-            // Readout
+            // Readout — 14 px monospace per spec
             let readout = if self.unit == "Hz" && *self.value < 0.01 {
                 "OFF".to_string()
             } else {
@@ -337,14 +337,14 @@ impl<'a> Widget for Fader<'a> {
                 Pos2::new(center_x, rect.min.y + 8.0),
                 egui::Align2::CENTER_CENTER,
                 &readout,
-                TextStyle::Body.resolve(ui.style()),
+                egui::FontId::monospace(14.0),
                 FG,
             );
             painter.text(
                 Pos2::new(center_x + 16.0, rect.min.y + 8.0),
                 egui::Align2::LEFT_CENTER,
                 self.unit,
-                TextStyle::Body.resolve(ui.style()),
+                egui::FontId::monospace(14.0),
                 FG_MUTED,
             );
 
@@ -368,16 +368,21 @@ impl<'a> Widget for Fader<'a> {
                 );
             }
 
-            // Fill
+            // Fill — two-stop vertical gradient via mesh (accent at top, FADER_GRADIENT_BOTTOM at bottom)
             let fill_height = *self.value * self.height - 2.0;
             if fill_height > 0.0 {
                 let fill_rect = Rect::from_min_max(
                     Pos2::new(track_rect.min.x + 1.0, track_rect.max.y - fill_height),
                     Pos2::new(track_rect.max.x - 1.0, track_rect.max.y - 1.0),
                 );
-                // Gradient approximation: top = accent, bottom = FADER_GRADIENT_BOTTOM
-                // In egui we can use a vertical gradient via mesh or just blend
-                painter.rect_filled(fill_rect, 2.0, self.accent.linear_multiply(0.8));
+                let mut mesh = egui::epaint::Mesh::default();
+                mesh.colored_vertex(fill_rect.left_top(),     self.accent);
+                mesh.colored_vertex(fill_rect.right_top(),    self.accent);
+                mesh.colored_vertex(fill_rect.right_bottom(), FADER_GRADIENT_BOTTOM);
+                mesh.colored_vertex(fill_rect.left_bottom(),  FADER_GRADIENT_BOTTOM);
+                mesh.add_triangle(0, 1, 2);
+                mesh.add_triangle(0, 2, 3);
+                painter.add(Shape::mesh(mesh));
             }
 
             // Cap
@@ -516,13 +521,13 @@ impl<'a> Widget for Encoder<'a> {
             painter.circle_filled(Pos2::new(cx, cy), inner_r, BG_INPUT);
             painter.circle_stroke(Pos2::new(cx, cy), inner_r, Stroke::new(1.0, BORDER));
 
-            // Center readout
+            // Center readout — 18 px monospace per spec
             let value_text = format!("{:.*}{}", self.decimals, self.value, self.unit);
             painter.text(
                 Pos2::new(cx, cy - if self.sub.is_some() { 4.0 } else { 0.0 }),
                 egui::Align2::CENTER_CENTER,
                 value_text,
-                TextStyle::Body.resolve(ui.style()),
+                egui::FontId::monospace(18.0),
                 FG,
             );
             if let Some(sub) = self.sub {
@@ -530,7 +535,7 @@ impl<'a> Widget for Encoder<'a> {
                     Pos2::new(cx, cy + 10.0),
                     egui::Align2::CENTER_CENTER,
                     sub,
-                    TextStyle::Body.resolve(ui.style()),
+                    egui::FontId::monospace(10.0),
                     FG_MUTED,
                 );
             }
@@ -599,12 +604,20 @@ pub fn dropzone(ui: &mut Ui, label: &str, hint: &str, on_browse: impl FnOnce()) 
         );
     }
 
-    // Browse button on the right
-    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+    // Browse button overlaid inside the right edge of the allocated rect
+    let btn_rect = Rect::from_min_size(
+        Pos2::new(rect.max.x - 68.0, rect.center().y - 12.0),
+        Vec2::new(60.0, 24.0),
+    );
+    let mut browsed = false;
+    ui.allocate_ui_at_rect(btn_rect, |ui| {
         if ui.add_sized([60.0, 24.0], egui::Button::new("Browse").fill(BG_RAISED).stroke(Stroke::new(1.0, BORDER))).clicked() {
-            on_browse();
+            browsed = true;
         }
     });
+    if browsed {
+        on_browse();
+    }
 
     response
 }
