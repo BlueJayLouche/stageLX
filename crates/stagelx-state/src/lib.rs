@@ -29,6 +29,14 @@ pub struct SpawnFixtureEvent(pub FixtureId);
 #[derive(Event, Debug, Clone, Copy)]
 pub struct DespawnFixtureEvent(pub FixtureId);
 
+/// Emitted by the Library UI when the user loads a venue file.
+/// The render plugin observes this and calls the actual mesh loader,
+/// keeping `stagelx-ui` free of any `stagelx-render` dependency.
+#[derive(Event, Debug, Clone)]
+pub struct LoadVenueEvent {
+    pub path: String,
+}
+
 // ─── Programmer ───────────────────────────────────────────────────────────────
 
 /// Normalised programmer state — all channel values 0.0–1.0.

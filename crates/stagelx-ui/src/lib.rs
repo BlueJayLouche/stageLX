@@ -11,8 +11,8 @@ use bevy_egui::egui::{Color32, Pos2, Rect, RichText, Stroke, StrokeKind, TextSty
 use std::collections::HashSet;
 
 pub use stagelx_state::{
-    DespawnFixtureEvent, FixtureLibraryRes, IoConfig, PatchEditState, PatchRes, Programmer,
-    SpawnFixtureEvent, VenueLoadState,
+    DespawnFixtureEvent, FixtureLibraryRes, IoConfig, LoadVenueEvent, PatchEditState, PatchRes,
+    Programmer, SpawnFixtureEvent, VenueLoadState,
 };
 use stagelx_core::types::FixtureId;
 
@@ -114,13 +114,10 @@ fn ui_root_system(
     mut io_cfg: ResMut<IoConfig>,
     mut io_state: ResMut<IoPanelState>,
     mut venue_state: ResMut<VenueLoadState>,
-    venue_query: Query<Entity, With<stagelx_render::VenueRoot>>,
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
     windows: Query<&Window>,
 ) {
-    let Ok(window) = windows.single() else { return };
+    let Ok(_window) = windows.single() else { return };
     let egui_ctx = ctx.ctx_mut().expect("egui context");
 
     // Apply global dark style
@@ -189,7 +186,7 @@ fn ui_root_system(
                     ui.add_space(2.0);
                 }
 
-                ui.add_space(ui.available_width() - 280.0); // spacer
+                ui.add_space((ui.available_width() - 280.0).max(0.0)); // spacer
 
                 // Protocol pills
                 widgets::pill(ui, "Art-Net", Some(widgets::DotState::Live));
@@ -233,7 +230,7 @@ fn ui_root_system(
                     ui.label(status_bar_text("U1 81/512"));
                     ui.label(status_bar_text("·"));
                     ui.label(status_bar_text("U2 65/512"));
-                    ui.add_space(ui.available_width() - 200.0);
+                    ui.add_space((ui.available_width() - 200.0).max(0.0));
                     ui.label(status_bar_text("arena-mainstage.glb"));
                     ui.label(status_bar_text("·"));
                     ui.label(RichText::new("● record armed").size(10.0).monospace().color(RX));
@@ -255,11 +252,11 @@ fn ui_root_system(
                     ui.add_space(10.0);
                     ui.label(RichText::new("Programmer").size(10.0).strong().color(FG_SECONDARY));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.add_sized([18.0, 18.0], egui::Button::new("⛶").small().fill(Color32::TRANSPARENT).stroke(Stroke::NONE)).clicked() {
+                        if widgets::icon_btn_detach(ui).on_hover_text("Detach").clicked() {
                             layout.detached.insert(PanelKind::Programmer);
                         }
                         let is_min = layout.minimized.contains(&PanelKind::Programmer);
-                        if ui.add_sized([18.0, 18.0], egui::Button::new("━").small().fill(Color32::TRANSPARENT).stroke(Stroke::NONE)).on_hover_text(if is_min { "Restore" } else { "Minimize" }).clicked() {
+                        if widgets::icon_btn_minimize(ui).on_hover_text(if is_min { "Restore" } else { "Minimize" }).clicked() {
                             if is_min { layout.minimized.remove(&PanelKind::Programmer); } else { layout.minimized.insert(PanelKind::Programmer); }
                         }
                     });
@@ -284,11 +281,11 @@ fn ui_root_system(
                     ui.add_space(10.0);
                     ui.label(RichText::new("DMX I/O").size(10.0).strong().color(FG_SECONDARY));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.add_sized([18.0, 18.0], egui::Button::new("⛶").small().fill(Color32::TRANSPARENT).stroke(Stroke::NONE)).clicked() {
+                        if widgets::icon_btn_detach(ui).on_hover_text("Detach").clicked() {
                             layout.detached.insert(PanelKind::Io);
                         }
                         let is_min = layout.minimized.contains(&PanelKind::Io);
-                        if ui.add_sized([18.0, 18.0], egui::Button::new("━").small().fill(Color32::TRANSPARENT).stroke(Stroke::NONE)).on_hover_text(if is_min { "Restore" } else { "Minimize" }).clicked() {
+                        if widgets::icon_btn_minimize(ui).on_hover_text(if is_min { "Restore" } else { "Minimize" }).clicked() {
                             if is_min { layout.minimized.remove(&PanelKind::Io); } else { layout.minimized.insert(PanelKind::Io); }
                         }
                     });
@@ -318,7 +315,7 @@ fn ui_root_system(
             );
 
             // Viewport region (rendered as layout placeholders — actual 3D is underneath)
-            ui.allocate_ui_at_rect(viewport_rect, |ui| {
+            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(viewport_rect), |ui| {
                 let avail = ui.available_size();
                 let split_x = avail.x * 0.75;
                 let split_y = avail.y * 0.5;
@@ -414,24 +411,24 @@ fn ui_root_system(
             });
 
             // Bottom strip: Patch + Library
-            ui.allocate_ui_at_rect(bottom_rect, |ui| {
+            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(bottom_rect), |ui| {
                 ui.painter().line_segment([Pos2::new(bottom_rect.min.x, bottom_rect.min.y), Pos2::new(bottom_rect.max.x, bottom_rect.min.y)], Stroke::new(1.0, BORDER));
                 let avail = ui.available_size();
                 let patch_width = avail.x * 1.4 / 2.4;
 
                 // Patch panel
                 let patch_rect = Rect::from_min_size(bottom_rect.min, Vec2::new(patch_width, avail.y));
-                ui.allocate_ui_at_rect(patch_rect, |ui| {
+                ui.allocate_new_ui(egui::UiBuilder::new().max_rect(patch_rect), |ui| {
                     ui.horizontal(|ui| {
                         ui.set_min_size(Vec2::new(ui.available_width(), 28.0));
                         ui.add_space(10.0);
                         ui.label(RichText::new("Patch").size(10.0).strong().color(FG_SECONDARY));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.add_sized([18.0, 18.0], egui::Button::new("⛶").small().fill(Color32::TRANSPARENT).stroke(Stroke::NONE)).clicked() {
+                            if widgets::icon_btn_detach(ui).on_hover_text("Detach").clicked() {
                                 layout.detached.insert(PanelKind::Patch);
                             }
                             let is_min = layout.minimized.contains(&PanelKind::Patch);
-                            if ui.add_sized([18.0, 18.0], egui::Button::new("━").small().fill(Color32::TRANSPARENT).stroke(Stroke::NONE)).on_hover_text(if is_min { "Restore" } else { "Minimize" }).clicked() {
+                            if widgets::icon_btn_minimize(ui).on_hover_text(if is_min { "Restore" } else { "Minimize" }).clicked() {
                                 if is_min { layout.minimized.remove(&PanelKind::Patch); } else { layout.minimized.insert(PanelKind::Patch); }
                             }
                         });
@@ -455,7 +452,7 @@ fn ui_root_system(
                     Pos2::new(bottom_rect.min.x + patch_width, bottom_rect.min.y),
                     Vec2::new(avail.x - patch_width, avail.y),
                 );
-                ui.allocate_ui_at_rect(lib_rect, |ui| {
+                ui.allocate_new_ui(egui::UiBuilder::new().max_rect(lib_rect), |ui| {
                     ui.painter().line_segment(
                         [Pos2::new(lib_rect.min.x, lib_rect.min.y), Pos2::new(lib_rect.min.x, lib_rect.max.y)],
                         Stroke::new(1.0, BORDER),
@@ -465,11 +462,11 @@ fn ui_root_system(
                         ui.add_space(10.0);
                         ui.label(RichText::new("Library").size(10.0).strong().color(FG_SECONDARY));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.add_sized([18.0, 18.0], egui::Button::new("⛶").small().fill(Color32::TRANSPARENT).stroke(Stroke::NONE)).clicked() {
+                            if widgets::icon_btn_detach(ui).on_hover_text("Detach").clicked() {
                                 layout.detached.insert(PanelKind::Library);
                             }
                             let is_min = layout.minimized.contains(&PanelKind::Library);
-                            if ui.add_sized([18.0, 18.0], egui::Button::new("━").small().fill(Color32::TRANSPARENT).stroke(Stroke::NONE)).on_hover_text(if is_min { "Restore" } else { "Minimize" }).clicked() {
+                            if widgets::icon_btn_minimize(ui).on_hover_text(if is_min { "Restore" } else { "Minimize" }).clicked() {
                                 if is_min { layout.minimized.remove(&PanelKind::Library); } else { layout.minimized.insert(PanelKind::Library); }
                             }
                         });
@@ -483,9 +480,6 @@ fn ui_root_system(
                             &mut patch,
                             &mut venue_state,
                             &mut commands,
-                            &mut meshes,
-                            &mut materials,
-                            &venue_query,
                         );
                     }
                 });
@@ -493,11 +487,22 @@ fn ui_root_system(
         });
 
     // ── Detached floating windows ─────────────────────────────────────────────
+    let float_frame = egui::Frame::window(&egui_ctx.style())
+        .fill(BG_PANEL)
+        .stroke(Stroke::new(1.0, BORDER))
+        .shadow(egui::epaint::Shadow {
+            offset: [0, 8],
+            blur: 24,
+            spread: 2,
+            color: Color32::from_black_alpha(102),
+        });
+
     if layout.detached.contains(&PanelKind::Programmer) {
         egui::Window::new("Programmer")
             .default_pos([100.0, 100.0])
             .default_width(360.0)
             .resizable(true)
+            .frame(float_frame)
             .show(egui_ctx, |ui| {
                 programmer::programmer_panel_docked(ui, &mut prog, &patch_sel, &patch);
                 if ui.button("Re-dock").clicked() {
@@ -511,6 +516,7 @@ fn ui_root_system(
             .default_width(580.0)
             .default_height(400.0)
             .resizable(true)
+            .frame(float_frame)
             .show(egui_ctx, |ui| {
                 patch::patch_panel_docked(ui, &mut patch, &library, &mut patch_edit, &mut patch_sel, &mut commands);
                 if ui.button("Re-dock").clicked() {
@@ -524,8 +530,9 @@ fn ui_root_system(
             .default_width(420.0)
             .default_height(400.0)
             .resizable(true)
+            .frame(float_frame)
             .show(egui_ctx, |ui| {
-                library::library_panel_docked(ui, &mut library, &mut patch, &mut venue_state, &mut commands, &mut meshes, &mut materials, &venue_query);
+                library::library_panel_docked(ui, &mut library, &mut patch, &mut venue_state, &mut commands);
                 if ui.button("Re-dock").clicked() {
                     layout.detached.remove(&PanelKind::Library);
                 }
@@ -536,6 +543,7 @@ fn ui_root_system(
             .default_pos([1000.0, 100.0])
             .default_width(360.0)
             .resizable(true)
+            .frame(float_frame)
             .show(egui_ctx, |ui| {
                 io_panel::io_panel_docked(ui, &mut io_cfg, &mut io_state);
                 if ui.button("Re-dock").clicked() {

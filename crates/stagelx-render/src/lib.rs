@@ -13,7 +13,7 @@ use stagelx_core::{
     fixture::FixtureInstance,
     types::{DmxAddress, FixtureId},
 };
-use stagelx_state::{FixtureLibraryRes, PatchRes, VenueLoadState};
+use stagelx_state::{FixtureLibraryRes, LoadVenueEvent, PatchRes, VenueLoadState};
 use beam::{BeamMaterial, GoboLibrary, setup_gobos};
 use beam_sprite::BeamSpriteMaterial;
 use camera::{foh_camera_input, foh_camera_update};
@@ -23,7 +23,7 @@ use lod::{
     sync_beam_camera_to_foh, evaluate_beam_lod, apply_beam_lod,
     resize_beam_render_target,
 };
-pub use venue::{VenueRoot, load_venue};
+pub use venue::VenueRoot;
 
 pub struct StageLxRenderPlugin;
 
@@ -35,6 +35,7 @@ impl Plugin for StageLxRenderPlugin {
             .add_plugins(MaterialPlugin::<BeamCompositeMaterial>::default())
             .add_observer(fixture::on_fixture_spawned)
             .add_observer(fixture::on_fixture_despawned)
+            .add_observer(on_load_venue)
             .add_systems(
                 Startup,
                 (scene::setup_scene, setup_gobos, setup_beam_lod, spawn_demo_fixtures).chain(),
@@ -55,6 +56,26 @@ impl Plugin for StageLxRenderPlugin {
                 )
                     .chain(),
             );
+    }
+}
+
+// ─── LoadVenueEvent observer ──────────────────────────────────────────────────
+
+fn on_load_venue(
+    trigger: On<LoadVenueEvent>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut venue_state: ResMut<VenueLoadState>,
+    existing: Query<Entity, With<VenueRoot>>,
+) {
+    let path = trigger.event().path.clone();
+    match venue::load_venue(&path, &mut commands, &mut meshes, &mut materials, &existing) {
+        Ok(()) => {
+            venue_state.import_error = None;
+            venue_state.import_path.clear();
+        }
+        Err(e) => venue_state.import_error = Some(e),
     }
 }
 
