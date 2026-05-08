@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy_egui::egui::{self, Color32, Pos2, RichText, Sense, Stroke, StrokeKind, Ui, Vec2};
-use stagelx_core::{fixture::FixtureInstance, types::{DmxAddress, FixtureId}};
+use stagelx_core::{fixture::{DmxChannelMap, FixtureInstance}, types::{DmxAddress, FixtureId}};
 
 use crate::theme::*;
 use crate::widgets;
@@ -20,11 +20,12 @@ pub fn patch_panel(
 // Patch Panel (docked / inline)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-#[derive(Default)]
-#[derive(Clone)]
+#[derive(Default, Clone)]
 struct PatchFilterState {
     query: String,
     chip: PatchChip,
+    /// Last fixture clicked without shift — anchor for range selection.
+    anchor_id: Option<FixtureId>,
 }
 
 #[derive(Clone, Copy, Default, PartialEq)]
@@ -54,25 +55,9 @@ pub fn patch_panel_docked(
 
     // ── Toolbar ───────────────────────────────────────────────────────────────
     ui.horizontal(|ui| {
-        // Search input
+        // Search input — single widget, no overlapping painted rect
         let search_width = available_width - 180.0;
-        ui.add_space(0.0);
-        let (rect, _response) = ui.allocate_exact_size(Vec2::new(search_width, 24.0), Sense::click());
-        if ui.is_rect_visible(rect) {
-            let painter = ui.painter();
-            painter.rect_filled(rect, 3.0, BG_INPUT);
-            painter.rect_stroke(rect, 3.0, Stroke::new(1.0, BORDER_SOFT), StrokeKind::Middle);
-            // Search icon placeholder
-            painter.text(
-                Pos2::new(rect.min.x + 7.0, rect.center().y),
-                egui::Align2::LEFT_CENTER,
-                "🔍",
-                egui::TextStyle::Body.resolve(ui.style()),
-                FG_MUTED,
-            );
-        }
-        // Simplified: use egui text edit
-        ui.add_sized([search_width - 24.0, 24.0], egui::TextEdit::singleline(&mut filter.query).hint_text("Filter by name, type, address…"));
+        ui.add_sized([search_width, 24.0], egui::TextEdit::singleline(&mut filter.query).hint_text("🔍  Filter by name, type, address…"));
 
         // Quick chips
         let chips = [("All", PatchChip::All), ("Live", PatchChip::Live), ("U1", PatchChip::U1), ("U2", PatchChip::U2)];
@@ -143,18 +128,31 @@ pub fn patch_panel_docked(
                         |ui| {
                             let (rect, response) = ui.allocate_exact_size(Vec2::new(full_width, row_height), Sense::click());
                             if response.clicked() {
-                                if ui.input(|i| i.modifiers.command || i.modifiers.ctrl) {
+                                if ui.input(|inp| inp.modifiers.command || inp.modifiers.ctrl) {
                                     if patch_sel.selected_ids.contains(&f.id) {
                                         patch_sel.selected_ids.remove(&f.id);
                                     } else {
                                         patch_sel.selected_ids.insert(f.id);
+                                        filter.anchor_id = Some(f.id);
                                     }
-                                } else if ui.input(|i| i.modifiers.shift) {
-                                    // Range select stub: just add
-                                    patch_sel.selected_ids.insert(f.id);
+                                } else if ui.input(|inp| inp.modifiers.shift) {
+                                    // Range select: extend from anchor to current row
+                                    if let Some(anchor) = filter.anchor_id {
+                                        if let Some(a_idx) = fixtures.iter().position(|x| x.id == anchor) {
+                                            let (lo, hi) = if a_idx <= i { (a_idx, i) } else { (i, a_idx) };
+                                            for fx in &fixtures[lo..=hi] {
+                                                patch_sel.selected_ids.insert(fx.id);
+                                            }
+                                        } else {
+                                            patch_sel.selected_ids.insert(f.id);
+                                        }
+                                    } else {
+                                        patch_sel.selected_ids.insert(f.id);
+                                    }
                                 } else {
                                     patch_sel.selected_ids.clear();
                                     patch_sel.selected_ids.insert(f.id);
+                                    filter.anchor_id = Some(f.id);
                                 }
                             }
 
@@ -185,9 +183,10 @@ pub fn patch_panel_docked(
                                 );
                                 x += 40.0;
 
-                                // Name with dot
+                                // Live/idle dot + name (dot is Idle placeholder — live tracking is future work)
+                                painter.circle_filled(Pos2::new(x + 4.0, rect.center().y), 3.0, widgets::DotState::Idle.color());
                                 let name_x = x + 14.0;
-                                ui.painter().text(
+                                painter.text(
                                     Pos2::new(name_x, rect.center().y),
                                     egui::Align2::LEFT_CENTER,
                                     &f.name,
@@ -317,7 +316,7 @@ pub fn patch_panel_docked(
                         if !modes.contains(&edit.selected_mode) {
                             edit.selected_mode = modes[0].clone();
                         }
-                        egui::ComboBox::from_label("")
+                        egui::ComboBox::from_id_salt("mode_combo")
                             .selected_text(&edit.selected_mode)
                             .show_ui(ui, |ui| {
                                 for m in &modes {
@@ -331,7 +330,7 @@ pub fn patch_panel_docked(
                     ui.add_sized([60.0, 24.0], egui::TextEdit::singleline(&mut edit.channel_str).hint_text("Ch"));
 
                     if ui.add_sized([80.0, 24.0], egui::Button::new(RichText::new("+ Patch").color(ACCENT)).fill(ACCENT_BG).stroke(Stroke::new(1.0, ACCENT_DIM))).clicked() {
-                        match add_fixture(patch, edit, commands) {
+                        match add_fixture(patch, edit, library, commands) {
                             Ok(()) => {}
                             Err(e) => edit.add_error = Some(e),
                         }
@@ -355,6 +354,7 @@ pub fn patch_panel_docked(
 fn add_fixture(
     patch: &mut PatchRes,
     edit: &mut PatchEditState,
+    library: &FixtureLibraryRes,
     commands: &mut Commands,
 ) -> Result<(), String> {
     let universe: u16 = edit.universe_str.trim().parse()
@@ -378,6 +378,12 @@ fn add_fixture(
         edit.new_name.trim().to_string()
     };
 
+    let channel_map = library
+        .library
+        .get(&edit.selected_type_id)
+        .map(|ft| ft.channel_map(&edit.selected_mode))
+        .unwrap_or_default();
+
     let id = patch.0.add(FixtureInstance {
         id: FixtureId(0),
         name,
@@ -386,6 +392,7 @@ fn add_fixture(
         address: DmxAddress::new(universe, channel),
         position: [0.0, 6.0, 0.0],
         rotation: [0.0, 0.0, 0.0],
+        channel_map,
     });
 
     commands.trigger(SpawnFixtureEvent(id));

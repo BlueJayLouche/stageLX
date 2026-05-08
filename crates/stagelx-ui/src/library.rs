@@ -1,7 +1,8 @@
 use bevy::prelude::*;
 use bevy_egui::egui::{self, Color32, Pos2, Rect, RichText, Sense, Stroke, StrokeKind, Ui, Vec2};
 use stagelx_gdtf::parse_mvr;
-use stagelx_render::{VenueLoadState, VenueRoot, load_venue};
+use stagelx_render::{VenueRoot, load_venue};
+use crate::VenueLoadState;
 
 use crate::theme::*;
 use crate::widgets;
@@ -86,7 +87,7 @@ pub fn library_panel_docked_with_resources(
             if ui.is_rect_visible(rect) {
                 let painter = ui.painter();
                 if active {
-                    painter.line_segment([Pos2::new(rect.min.x, rect.min.y), Pos2::new(rect.max.x, rect.min.y)], Stroke::new(1.0, ACCENT));
+                    painter.line_segment([Pos2::new(rect.min.x, rect.max.y - 1.0), Pos2::new(rect.max.x, rect.max.y - 1.0)], Stroke::new(1.0, ACCENT));
                 }
                 painter.text(
                     rect.center(),
@@ -126,10 +127,15 @@ fn fixtures_tab(
 ) {
     let available_width = ui.available_width();
 
-    // Search
+    // Search — stored in egui temp data, independent of the GDTF import path
     ui.horizontal(|ui| {
         let search_width = available_width;
-        ui.add_sized([search_width - 24.0, 24.0], egui::TextEdit::singleline(&mut res.import_path).hint_text("Search manufacturer, model…"));
+        let search_id = ui.id().with("lib_search_query");
+        let mut q: String = ui.ctx().data_mut(|d| {
+            d.get_temp_mut_or_insert_with(search_id, String::new).clone()
+        });
+        ui.add_sized([search_width - 24.0, 24.0], egui::TextEdit::singleline(&mut q).hint_text("Search manufacturer, model…"));
+        ui.ctx().data_mut(|d| d.insert_temp(search_id, q));
     });
     ui.add_space(8.0);
 
@@ -459,13 +465,14 @@ fn load_mvr(
         if let Some(real_id) = name_to_id.get(&inst.fixture_type_id) {
             inst.fixture_type_id = real_id.clone();
         }
-        if res.library.get(&inst.fixture_type_id).is_none() {
+        if let Some(ft) = res.library.get(&inst.fixture_type_id) {
+            inst.channel_map = ft.channel_map(&inst.dmx_mode);
+            let id = patch.0.add(inst);
+            commands.trigger(SpawnFixtureEvent(id));
+            count += 1;
+        } else {
             bevy::log::warn!("MVR: fixture '{}' references unknown type '{}'", inst.name, inst.fixture_type_id);
-            continue;
         }
-        let id = patch.0.add(inst);
-        commands.trigger(SpawnFixtureEvent(id));
-        count += 1;
     }
 
     res.mvr_import_error = None;

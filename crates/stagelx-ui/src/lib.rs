@@ -12,9 +12,8 @@ use std::collections::HashSet;
 
 pub use stagelx_state::{
     DespawnFixtureEvent, FixtureLibraryRes, IoConfig, PatchEditState, PatchRes, Programmer,
-    SpawnFixtureEvent,
+    SpawnFixtureEvent, VenueLoadState,
 };
-pub use stagelx_render::VenueLoadState;
 use stagelx_core::types::FixtureId;
 
 use crate::theme::*;
@@ -35,11 +34,21 @@ pub enum PanelKind {
 // New resources
 // ═══════════════════════════════════════════════════════════════════════════════
 
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub struct UiLayoutState {
     pub detached: HashSet<PanelKind>,
     pub minimized: HashSet<PanelKind>,
     pub show_status_bar: bool,
+}
+
+impl Default for UiLayoutState {
+    fn default() -> Self {
+        Self {
+            detached: HashSet::new(),
+            minimized: HashSet::new(),
+            show_status_bar: true,
+        }
+    }
 }
 
 #[derive(Resource, Default)]
@@ -126,6 +135,12 @@ fn ui_root_system(
     style.visuals.widgets.active.bg_fill = BG_INPUT;
     style.visuals.selection.bg_fill = ACCENT_BG;
     style.visuals.selection.stroke = Stroke::new(1.0, ACCENT);
+    style.visuals.window_shadow = egui::epaint::Shadow {
+        offset: [0, 6],
+        blur: 20,
+        spread: 2,
+        color: Color32::from_black_alpha(90),
+    };
     egui_ctx.set_style(style);
 
     // ── Top bar ───────────────────────────────────────────────────────────────
@@ -243,13 +258,17 @@ fn ui_root_system(
                         if ui.add_sized([18.0, 18.0], egui::Button::new("⛶").small().fill(Color32::TRANSPARENT).stroke(Stroke::NONE)).clicked() {
                             layout.detached.insert(PanelKind::Programmer);
                         }
+                        let is_min = layout.minimized.contains(&PanelKind::Programmer);
+                        if ui.add_sized([18.0, 18.0], egui::Button::new("━").small().fill(Color32::TRANSPARENT).stroke(Stroke::NONE)).on_hover_text(if is_min { "Restore" } else { "Minimize" }).clicked() {
+                            if is_min { layout.minimized.remove(&PanelKind::Programmer); } else { layout.minimized.insert(PanelKind::Programmer); }
+                        }
                     });
                 });
                 ui.painter().line_segment([Pos2::new(ui.min_rect().min.x, ui.cursor().min.y), Pos2::new(ui.min_rect().max.x, ui.cursor().min.y)], Stroke::new(1.0, BORDER));
 
                 if !layout.minimized.contains(&PanelKind::Programmer) {
                     ui.add_space(8.0);
-                    programmer::programmer_panel_docked(ui, &mut prog, &patch_sel);
+                    programmer::programmer_panel_docked(ui, &mut prog, &patch_sel, &patch);
                 }
             });
     }
@@ -267,6 +286,10 @@ fn ui_root_system(
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.add_sized([18.0, 18.0], egui::Button::new("⛶").small().fill(Color32::TRANSPARENT).stroke(Stroke::NONE)).clicked() {
                             layout.detached.insert(PanelKind::Io);
+                        }
+                        let is_min = layout.minimized.contains(&PanelKind::Io);
+                        if ui.add_sized([18.0, 18.0], egui::Button::new("━").small().fill(Color32::TRANSPARENT).stroke(Stroke::NONE)).on_hover_text(if is_min { "Restore" } else { "Minimize" }).clicked() {
+                            if is_min { layout.minimized.remove(&PanelKind::Io); } else { layout.minimized.insert(PanelKind::Io); }
                         }
                     });
                 });
@@ -407,6 +430,10 @@ fn ui_root_system(
                             if ui.add_sized([18.0, 18.0], egui::Button::new("⛶").small().fill(Color32::TRANSPARENT).stroke(Stroke::NONE)).clicked() {
                                 layout.detached.insert(PanelKind::Patch);
                             }
+                            let is_min = layout.minimized.contains(&PanelKind::Patch);
+                            if ui.add_sized([18.0, 18.0], egui::Button::new("━").small().fill(Color32::TRANSPARENT).stroke(Stroke::NONE)).on_hover_text(if is_min { "Restore" } else { "Minimize" }).clicked() {
+                                if is_min { layout.minimized.remove(&PanelKind::Patch); } else { layout.minimized.insert(PanelKind::Patch); }
+                            }
                         });
                     });
                     ui.painter().line_segment([Pos2::new(patch_rect.min.x, ui.cursor().min.y), Pos2::new(patch_rect.max.x, ui.cursor().min.y)], Stroke::new(1.0, BORDER));
@@ -441,6 +468,10 @@ fn ui_root_system(
                             if ui.add_sized([18.0, 18.0], egui::Button::new("⛶").small().fill(Color32::TRANSPARENT).stroke(Stroke::NONE)).clicked() {
                                 layout.detached.insert(PanelKind::Library);
                             }
+                            let is_min = layout.minimized.contains(&PanelKind::Library);
+                            if ui.add_sized([18.0, 18.0], egui::Button::new("━").small().fill(Color32::TRANSPARENT).stroke(Stroke::NONE)).on_hover_text(if is_min { "Restore" } else { "Minimize" }).clicked() {
+                                if is_min { layout.minimized.remove(&PanelKind::Library); } else { layout.minimized.insert(PanelKind::Library); }
+                            }
                         });
                     });
                     ui.painter().line_segment([Pos2::new(lib_rect.min.x, ui.cursor().min.y), Pos2::new(lib_rect.max.x, ui.cursor().min.y)], Stroke::new(1.0, BORDER));
@@ -468,7 +499,7 @@ fn ui_root_system(
             .default_width(360.0)
             .resizable(true)
             .show(egui_ctx, |ui| {
-                programmer::programmer_panel_docked(ui, &mut prog, &patch_sel);
+                programmer::programmer_panel_docked(ui, &mut prog, &patch_sel, &patch);
                 if ui.button("Re-dock").clicked() {
                     layout.detached.remove(&PanelKind::Programmer);
                 }
