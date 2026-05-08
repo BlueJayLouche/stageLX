@@ -204,6 +204,7 @@ fn convert_fixture(data: MvrFixtureData, seq: u32) -> Option<FixtureInstance> {
         address: DmxAddress::new(universe, channel),
         position,
         rotation,
+        channel_map: Default::default(), // computed after GDTF library load
     })
 }
 

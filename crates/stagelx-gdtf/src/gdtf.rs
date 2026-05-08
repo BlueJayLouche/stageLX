@@ -1,5 +1,6 @@
 use std::io::Read;
 use zip::ZipArchive;
+use stagelx_core::fixture::DmxChannelMap;
 use crate::error::GdtfError;
 
 // ─── Public types ─────────────────────────────────────────────────────────────
@@ -437,6 +438,38 @@ impl GdtfFixtureType {
             None
         }
         search(&self.geometries).unwrap_or(10.0)
+    }
+
+    /// Build a `DmxChannelMap` for the named mode (or first mode if empty).
+    pub fn channel_map(&self, mode_name: &str) -> DmxChannelMap {
+        let mut map = DmxChannelMap::default();
+        let Some(mode) = self.find_mode(mode_name) else { return map };
+
+        if let Some(ch) = mode.channel_for("Dimmer") {
+            map.dimmer = Some(ch.offset.saturating_sub(1));
+        }
+        if let Some(ch) = mode.channel_for("Pan") {
+            map.pan = Some(ch.offset.saturating_sub(1));
+            if ch.resolution >= 2 {
+                map.pan_fine = Some(ch.offset);
+            }
+        }
+        if let Some(ch) = mode.channel_for("Tilt") {
+            map.tilt = Some(ch.offset.saturating_sub(1));
+            if ch.resolution >= 2 {
+                map.tilt_fine = Some(ch.offset);
+            }
+        }
+        if let Some(ch) = mode.channel_for("ColorAdd_R") {
+            map.red = Some(ch.offset.saturating_sub(1));
+        }
+        if let Some(ch) = mode.channel_for("ColorAdd_G") {
+            map.green = Some(ch.offset.saturating_sub(1));
+        }
+        if let Some(ch) = mode.channel_for("ColorAdd_B") {
+            map.blue = Some(ch.offset.saturating_sub(1));
+        }
+        map
     }
 }
 
