@@ -173,7 +173,7 @@ pub fn sacn_manage_socket(mut state: ResMut<SacnState>, cfg: Res<IoConfig>) {
                 Ok(rx_sock) => {
                     rx_sock.set_nonblocking(false).ok();
 
-                    let (tx, rx) = bounded::<ReceivedSacnPacket>(256);
+                    let (tx, rx) = bounded::<ReceivedSacnPacket>(8);
                     state.rx_chan = Some(rx);
                     state.rx_thread_tx = Some(tx.clone());
 

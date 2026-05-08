@@ -1,8 +1,4 @@
-use bevy::{
-    asset::RenderAssetUsages,
-    mesh::{Indices, PrimitiveTopology},
-    prelude::*,
-};
+use bevy::prelude::*;
 use stagelx_core::types::FixtureId;
 use stagelx_state::{FixtureLibraryRes, PatchRes, Programmer, SpawnFixtureEvent, DespawnFixtureEvent};
 use crate::beam::{BeamMaterial, GoboLibrary, build_beam_cone};
@@ -102,7 +98,7 @@ pub fn on_fixture_spawned(
                 .map(|ch| (ch.physical_to - ch.physical_from).abs())
                 .unwrap_or(270.0);
 
-            let body_mesh = mesh_from_gdtf(ft, &mut meshes);
+            let body_mesh = crate::adapters::three_ds::mesh_from_gdtf(ft, &mut meshes);
 
             (pan_range, tilt_range, ft.beam_angle(), body_mesh)
         } else {
@@ -342,23 +338,3 @@ pub fn keyboard_programmer(
     }
 }
 
-// ─── GDTF 3DS geometry helper ─────────────────────────────────────────────────
-
-/// Try to build a Bevy mesh from the first 3DS model embedded in a GDTF fixture type.
-/// Returns None if no models are present or parsing fails.
-pub fn mesh_from_gdtf(
-    ft: &stagelx_gdtf::gdtf::GdtfFixtureType,
-    meshes: &mut Assets<Mesh>,
-) -> Option<Handle<Mesh>> {
-    let (_, bytes) = ft.models.first()?;
-    let scene = stagelx_3ds::parse(bytes).ok()?;
-    let mesh3d = scene.meshes.into_iter().next()?;
-    let (pos, norm, uvs, idx) = stagelx_3ds::to_bevy_buffers(&mesh3d);
-
-    let mut m = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD);
-    m.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
-    m.insert_attribute(Mesh::ATTRIBUTE_NORMAL,   norm);
-    m.insert_attribute(Mesh::ATTRIBUTE_UV_0,     uvs);
-    m.insert_indices(Indices::U32(idx));
-    Some(meshes.add(m))
-}

@@ -129,7 +129,7 @@ pub fn artnet_manage_socket(mut state: ResMut<ArtNetState>, cfg: Res<IoConfig>) 
                     // busy-polling with sleep(1ms).
                     rx_sock.set_nonblocking(false).ok();
 
-                    let (tx, rx) = bounded::<ReceivedPacket>(256);
+                    let (tx, rx) = bounded::<ReceivedPacket>(8);
                     state.rx_chan = Some(rx);
                     state.rx_thread_tx = Some(tx.clone());
 

@@ -3,6 +3,7 @@ pub mod error;
 pub mod midi;
 pub mod osc;
 pub mod sacn;
+pub mod supervisor;
 pub mod usb;
 
 use bevy::prelude::*;

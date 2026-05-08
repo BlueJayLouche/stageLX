@@ -7,7 +7,6 @@ members = [
     "crates/stagelx-io",
     "crates/stagelx-render",
     "crates/stagelx-ui",
-    "crates/stagelx-3ds",
 ]
 resolver = "2"
 
@@ -20,7 +19,7 @@ stagelx-state  = { path = "crates/stagelx-state" }
 stagelx-io     = { path = "crates/stagelx-io" }
 stagelx-render = { path = "crates/stagelx-render" }
 stagelx-ui     = { path = "crates/stagelx-ui" }
-stagelx-3ds    = { path = "crates/stagelx-3ds" }
+ds3            = { path = "../3ds-rs" }
 
 # Shared external deps
 bevy              = { version = "0.18.0" }

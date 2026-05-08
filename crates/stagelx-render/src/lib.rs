@@ -1,3 +1,4 @@
+pub mod adapters;
 pub mod beam;
 pub mod fixture;
 pub mod gobo;

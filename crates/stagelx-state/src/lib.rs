@@ -3,6 +3,15 @@
 //! Lives in its own crate so that stagelx-render, stagelx-io, and stagelx-ui
 //! can all depend on the resource *types* without any of them depending on
 //! each other.
+//!
+//! # FROZEN — do not add new Resources here
+//!
+//! New state belongs in its owning crate:
+//! - MIDI / OSC config → `stagelx-io`
+//! - Viewport layout → `stagelx-render`
+//! - Export staging → `stagelx-export` (future)
+//!
+//! Phase 6 will extract `Programmer` → `stagelx-show` and `PatchRes` → `stagelx-patch`.
 
 use bevy::prelude::*;
 use stagelx_core::{patch::Patch, types::FixtureId};
