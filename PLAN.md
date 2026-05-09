@@ -71,7 +71,7 @@ stageLX/
 | `stagelx-core` | `FixtureInstance`, `Patch`, `Universe`, `DmxBuffer`, attribute model |
 | `stagelx-gdtf` | Parse `.gdtf` (ZIP+XML), geometry trees, DMX modes, wheels, physicals |
 | `stagelx-dmx` | DMX frame generation, merge strategies (HTP/LTP), `DmxEngine` |
-| `stagelx-state` | Shared Bevy `Resource`s: `Programmer`, `PatchRes`, `FixtureLibraryRes`, `IoConfig` |
+| `stagelx-state` | Shared Bevy `Resource`s: `Programmer`, `PatchRes`, `FixtureLibraryRes` (`IoConfig` removed per Rule 22) |
 | `stagelx-io` | Art-Net Tx/Rx, sACN Tx/Rx, USB serial (Enttec), MIDI, OSC |
 | `stagelx-render` | Bevy plugin: volumetric beams, gobo projection, color, fog medium |
 | `stagelx-ui` | egui: patch editor, programmer, fixture library, DMX I/O panel |
@@ -100,7 +100,7 @@ All feature crates (io, render, ui) are leaf nodes — none depend on each other
 | Low-level GPU | `wgpu` (via Bevy) |
 | UI panels | `bevy_egui` 0.39.1 + `egui` |
 | GDTF/MVR ZIP parsing | `zip`, `quick-xml` |
-| 3D model loading (GDTF geometry) | `bevy_gltf` or `obj` |
+| 3D model loading (venue / GDTF geometry) | `tobj`, `gltf`, `ufbx` |
 | Art-Net | custom UDP (no external crate) |
 | sACN (E1.31) | custom UDP per ANSI E1.31-2016 (no external crate) |
 | I/O thread bridge | `crossbeam-channel` (bounded 256, no tokio) |
@@ -384,9 +384,9 @@ Output of a parallel Performance + Architect multi-role analysis of the Phase 5 
 
 | Rule | Status | Location |
 |---|---|---|
-| Rule 4: `MidiConfig`/`OscConfig` live in `stagelx-io` | **VIOLATED** — both still in `stagelx-state::IoConfig` | `state/src/lib.rs:149–171` |
-| Dependency graph: leaf crates don't depend on each other | **VIOLATED** — `stagelx-ui` imports `stagelx-render::VenueLoadState` | `ui/src/lib.rs:17,108` |
-| Rule 3: `IoSource`/`IoSink` contract; no bespoke thread management | **PARTIAL** — traits defined but no transport implements them; all transports still use ad-hoc `thread::spawn` | `io/src/supervisor.rs` |
+| Rule 4: `MidiConfig`/`OscConfig` live in `stagelx-io` | **✅ RESOLVED** — split into `MidiConfig`/`OscConfig` in `stagelx-io::config` | `io/src/config.rs` |
+| Dependency graph: leaf crates don't depend on each other | **✅ RESOLVED** — `VenueLoadState` moved to `stagelx-state`; `LoadVenueEvent` breaks cross-leaf dep | `state/src/lib.rs:115` |
+| Rule 3: `IoSource`/`IoSink` contract; no bespoke thread management | **PARTIAL** — traits defined but no transport formally implements them; Art-Net/sACN/OSC now have proper shutdown paths | `io/src/supervisor.rs` |
 | Rule 9: Emit `IoOverflowWarning` when channel found full | **NOT DONE** — event type missing; `IoSupervisor::rx_drops` never incremented | `io/src/supervisor.rs` |
 
 ### New Bindings (Rules 10–22)
@@ -394,6 +394,7 @@ Output of a parallel Performance + Architect multi-role analysis of the Phase 5 
 #### 10. IO RX threads must use `try_send`, not `send`
 - **Rule:** IO transport RX threads must use `try_send()` on the crossbeam channel. Blocking `send()` stalls the OS receive buffer under load, causing network-level packet loss invisible to the application.
 - **Action:** `artnet.rs:147`, `sacn.rs:194` — change `tx.send(pkt)` → `tx.try_send(pkt)`. On `Err(TrySendError::Full)` increment `IoSupervisor::rx_drops` and continue.
+- **Status:** ✅ Done — Art-Net, sACN, OSC already use `try_send`; MIDI callback fixed to use `try_send`. |
 
 #### 11. No `Arc<Vec<u8>>` on the UDP hot path — use `[u8; 512]`
 - **Rule:** `ReceivedPacket.data` must be a fixed-size `[u8; 512]` array field. The `Arc<Vec<u8>>` pattern causes ~3,200 heap allocations/sec at high universe count with no benefit (data is consumed once and dropped).
@@ -402,6 +403,7 @@ Output of a parallel Performance + Architect multi-role analysis of the Phase 5 
 #### 12. All IO transport threads must have a shutdown path
 - **Rule:** No transport thread may be permanently leaked when its protocol is disabled. Leaked threads hold bound OS ports, causing `EADDRINUSE` on re-enable.
 - **Action:** `osc.rs:74` — wrap `UdpSocket` in `Arc`, store a clone in `OscState`, call `shutdown(Shutdown::Both)` to unblock `recv_from` on disable. Apply the same pattern to Art-Net/sACN using the `IoSupervisor` shutdown signal once Rule 3 is implemented.
+- **Status:** ✅ Done — OSC already had shutdown flag + timeout; Art-Net and sACN now have `Arc<AtomicBool>` shutdown + 100ms recv timeout. |
 
 #### 13. No per-frame heap allocation in `Update` or `FixedUpdate` systems
 - **Rule:** ECS systems running at frame rate or the DMX tick rate must not allocate `Vec` or `HashMap` values that are discarded each tick. Use `Local<T>` to persist allocations across frames; rebuild only on structural changes.
@@ -448,6 +450,7 @@ Output of a parallel Performance + Architect multi-role analysis of the Phase 5 
   - Per-protocol `*Stats` Resources (frame counters, status strings) — owned by the IO system, written per-frame.
   - Config Resources for MIDI and OSC must live in `stagelx-io`, not `stagelx-state` (aligns with Rule 4).
 - **Action:** `state/src/lib.rs:107–219` → split across 5 new files in `io/src/`.
+- **Status:** ✅ Done — `ArtNetConfig`/`Stats`, `SacnConfig`/`Stats`, `UsbConfig`/`Stats`, `MidiConfig`/`Stats`, `OscConfig`/`Stats` created; `IoConfig` removed from `stagelx-state`. |
 
 ### Prioritized Fix List
 
@@ -455,21 +458,21 @@ Items 1–4 are under 45 minutes combined and must be done before any show call.
 
 | # | Action | Files | Effort |
 |---|---|---|---|
-| 1 | `try_send` in Art-Net/sACN RX threads (Rule 10) | `artnet.rs:147`, `sacn.rs:194` | 30 min |
-| 2 | Fix OSC socket leak on disable (Rule 12) | `osc.rs:74` | 1 h |
-| 3 | Remove `tokio` workspace dep (Rule 17) | `Cargo.toml:27` | 5 min |
-| 4 | Add `[profile.release]` with LTO (Rule 16) | `Cargo.toml` | 5 min |
-| 5 | Split `IoConfig` into per-protocol `*Config` + `*Stats` (Rules 22 + 4) | `state/src/lib.rs:107–219`, IO crates | 1 day |
-| 6 | Gate `articulate_beams` on `Changed<GlobalTransform>` (Rule 14) | `render/src/fixture.rs:303` | 2 h |
-| 7 | `[u8; 512]` on `ReceivedPacket` (Rule 11) | `artnet.rs:141`, `sacn.rs:188` | 30 min |
-| 8 | Move `programmer_to_dmx` to `stagelx-dmx` + `DmxChannelMap` cache (Rule 20) | `artnet.rs:228–306` → `dmx/src/projection.rs` | 4 h |
-| 9 | Move `VenueLoadState` to `stagelx-state` (Rule 21) | `ui/src/lib.rs:17,108` | 1 h |
-| 10 | Implement `IoSource` for Art-Net/sACN/OSC; wire `rx_drops` (Rule 3 + 10) | `supervisor.rs`, transports | 1 day |
-| 11 | `Local<Vec>` + `Local<HashMap>` in LOD systems (Rule 13) | `lod.rs:209`, `lod.rs:267` | 2 h |
-| 12 | Cache universe ID list in `DmxEngine` with dirty flag (Rule 13) | `engine.rs:51` | 1 h |
-| 13 | LOD hysteresis ±10 px (Rule 18) | `lod.rs:225` | 1 h |
-| 14 | Resize `BeamRenderTarget` on `WindowResized` (Rule 19) | `lod.rs:84` | 1 h |
-| 15 | Rate-limit MIDI port scan to 1 Hz (Rule 15) | `midi.rs:34` | 15 min |
+| 1 | `try_send` in Art-Net/sACN RX threads (Rule 10) | `artnet.rs:147`, `sacn.rs:194` | 30 min | ✅ |
+| 2 | Fix OSC socket leak on disable (Rule 12) | `osc.rs:74` | 1 h | ✅ |
+| 3 | Remove `tokio` workspace dep (Rule 17) | `Cargo.toml:27` | 5 min | ✅ |
+| 4 | Add `[profile.release]` with LTO (Rule 16) | `Cargo.toml` | 5 min | ✅ |
+| 5 | Split `IoConfig` into per-protocol `*Config` + `*Stats` (Rules 22 + 4) | `state/src/lib.rs:107–219`, IO crates | 1 day | ✅ |
+| 6 | Gate `articulate_beams` on `Changed<GlobalTransform>` (Rule 14) | `render/src/fixture.rs:303` | 2 h | |
+| 7 | `[u8; 512]` on `ReceivedPacket` (Rule 11) | `artnet.rs:141`, `sacn.rs:188` | 30 min | ✅ |
+| 8 | Move `programmer_to_dmx` to `stagelx-dmx` + `DmxChannelMap` cache (Rule 20) | `artnet.rs:228–306` → `dmx/src/projection.rs` | 4 h | ✅ |
+| 9 | Move `VenueLoadState` to `stagelx-state` (Rule 21) | `ui/src/lib.rs:17,108` | 1 h | ✅ |
+| 10 | Implement `IoSource` for Art-Net/sACN/OSC; wire `rx_drops` (Rule 3 + 10) | `supervisor.rs`, transports | 1 day | 🔲 |
+| 11 | `Local<Vec>` + `Local<HashMap>` in LOD systems (Rule 13) | `lod.rs:209`, `lod.rs:267` | 2 h | |
+| 12 | Cache universe ID list in `DmxEngine` with dirty flag (Rule 13) | `engine.rs:51` | 1 h | |
+| 13 | LOD hysteresis ±10 px (Rule 18) | `lod.rs:225` | 1 h | |
+| 14 | Resize `BeamRenderTarget` on `WindowResized` (Rule 19) | `lod.rs:84` | 1 h | |
+| 15 | Rate-limit MIDI port scan to 1 Hz (Rule 15) | `midi.rs:34` | 15 min | ✅ |
 
 ---
 
@@ -587,15 +590,16 @@ Output of a Frontend role analysis comparing the live `stagelx-ui` implementatio
 **Goal**: Real fixture/venue geometry, full input surface coverage, professional rendering.
 
 **Geometry loading**
-- [ ] Wire `stagelx_3ds::to_bevy_buffers()` into `on_fixture_spawned` (real GDTF models, cuboid fallback)
-- [ ] OBJ venue loader (`tobj` → Bevy mesh, same pattern as 3DS)
-- [ ] glTF/GLB venue loader (`gltf` crate → Bevy mesh)
+- [x] OBJ venue loader (`tobj` → Bevy mesh) — ✅ already existed
+- [x] glTF/GLB venue loader (`gltf` crate → Bevy mesh) — ✅ already existed
+- [x] FBX venue loader (`ufbx` crate → Bevy mesh, triangulated) — ✅ added 2026-05-08
+- [ ] Wire `ds3::to_bevy_buffers()` into `on_fixture_spawned` (real GDTF models, cuboid fallback)
 - [ ] "Scene Assets" UI section: load venue files, place at configurable world offset
 
 **I/O surfaces**
-- [ ] MIDI input: `midir` callback → crossbeam → Bevy; CC → attribute mapping per fixture/group
-- [ ] OSC input: `rosc` UDP → crossbeam → Bevy; `/fixture/{id}/{attr}` float messages
-- [ ] MIDI + OSC config UI (device selector, port, CC mapping table)
+- [x] MIDI input: `midir` callback → crossbeam → Bevy; CC → global Programmer or selected fixtures via `MidiTarget`
+- [x] OSC input: `rosc` UDP → crossbeam → Bevy; `/fixture/{id}/{attr}` float messages routed per-fixture through DMX engine
+- [x] MIDI + OSC config UI (device selector, port, CC mapping table, target mode toggle)
 
 **MVR export** (deferred from Phase 4)
 - [ ] Write `GeneralSceneDescription.xml` from current patch + library
@@ -657,4 +661,4 @@ Suggested `.gitignore`: standard Rust gitignore + `*.gdtf` test files (large bin
 
 ---
 
-*Last updated: 2026-05-08 — Phase 5 mid-point audit complete; frontend UI review complete; Rules 10–28 added*
+*Last updated: 2026-05-08 — Phase 5 mid-point audit complete; frontend UI review complete; Rules 10–28 added; IoConfig split (Rule 22), thread shutdown (Rule 12), MIDI/OSC per-fixture routing, FBX venue loader completed*
