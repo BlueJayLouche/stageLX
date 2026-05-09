@@ -11,3 +11,4 @@ ds3           = { workspace = true }
 bevy          = { workspace = true }
 tobj          = { workspace = true }
 gltf          = { workspace = true }
+ufbx          = { workspace = true }

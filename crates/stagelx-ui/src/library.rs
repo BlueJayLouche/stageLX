@@ -234,8 +234,8 @@ fn venue_tab(
         });
     });
 
-    if widgets::dropzone(ui, "Replace Venue", "OBJ · GLB · glTF") {
-        if let Some(path) = rfd::FileDialog::new().add_filter("Venue", &["obj", "glb", "gltf"]).pick_file() {
+    if widgets::dropzone(ui, "Replace Venue", "OBJ · GLB · glTF · FBX") {
+        if let Some(path) = rfd::FileDialog::new().add_filter("Venue", &["obj", "glb", "gltf", "fbx"]).pick_file() {
             commands.trigger(LoadVenueEvent { path: path.to_string_lossy().to_string() });
         }
     }

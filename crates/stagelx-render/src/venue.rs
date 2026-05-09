@@ -3,6 +3,7 @@
 //! Supports:
 //!   - OBJ  — parsed with `tobj`, converted to Bevy meshes manually
 //!   - GLB / glTF — parsed with the `gltf` crate, triangles extracted manually
+//!   - FBX — parsed with `ufbx`, triangulated and converted to Bevy meshes
 //!
 //! Loaded meshes are spawned as children of a root `VenueRoot` entity so that
 //! the entire venue can be despawned by removing that entity.
@@ -40,8 +41,10 @@ pub fn load_venue(
         load_obj(path, commands, meshes, materials)
     } else if lower.ends_with(".glb") || lower.ends_with(".gltf") {
         load_glb(path, commands, meshes, materials)
+    } else if lower.ends_with(".fbx") {
+        load_fbx(path, commands, meshes, materials)
     } else {
-        Err(format!("Unsupported format — use .obj or .glb/.gltf (got '{}')", path))
+        Err(format!("Unsupported format — use .obj, .glb/.gltf, or .fbx (got '{}')", path))
     }
 }
 
@@ -171,6 +174,100 @@ fn load_glb(
     }
 
     info!("Venue glTF loaded: {} primitive(s) from '{}'", mesh_count, path);
+    Ok(())
+}
+
+// ─── FBX loader ───────────────────────────────────────────────────────────────
+
+fn load_fbx(
+    path: &str,
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+) -> Result<(), String> {
+    let mut opts = ufbx::LoadOpts::default();
+    opts.generate_missing_normals = true;
+
+    let scene = ufbx::load_file(path, opts)
+        .map_err(|e| format!("FBX load error: {} — {}", e.description, e.info()))?;
+
+    let venue = commands.spawn((
+        Transform::default(),
+        Visibility::default(),
+        VenueRoot,
+    )).id();
+
+    let mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.5, 0.5, 0.5),
+        perceptual_roughness: 0.8,
+        metallic: 0.0,
+        ..default()
+    });
+
+    let mut mesh_count = 0usize;
+    for mesh in &scene.meshes {
+
+        if mesh.num_indices == 0 || mesh.num_faces == 0 {
+            continue;
+        }
+
+        // ufbx gives per-face-corner vertex attributes (num_indices total).
+        // Each face corner is already a unique vertex with its own normal/UV.
+        let mut positions = Vec::with_capacity(mesh.num_indices);
+        let mut normals = Vec::with_capacity(mesh.num_indices);
+        let mut uvs = Vec::with_capacity(mesh.num_indices);
+
+        for i in 0..mesh.num_indices {
+            let pos = mesh.vertex_position[i];
+            positions.push([pos.x as f32, pos.y as f32, pos.z as f32]);
+
+            let normal = if mesh.vertex_normal.exists {
+                mesh.vertex_normal[i]
+            } else {
+                ufbx::Vec3 { x: 0.0, y: 1.0, z: 0.0 }
+            };
+            normals.push([normal.x as f32, normal.y as f32, normal.z as f32]);
+
+            let uv = if mesh.vertex_uv.exists {
+                let uv = mesh.vertex_uv[i];
+                [uv.x as f32, uv.y as f32]
+            } else {
+                [0.0, 0.0]
+            };
+            uvs.push(uv);
+        }
+
+        // Triangulate faces (fan triangulation for n-gons).
+        let mut indices = Vec::new();
+        for face in mesh.faces.as_ref() {
+            let n = face.num_indices as usize;
+            if n < 3 {
+                continue;
+            }
+            let base = face.index_begin as usize;
+            for i in 1..(n - 1) {
+                indices.push(base as u32);
+                indices.push((base + i) as u32);
+                indices.push((base + i + 1) as u32);
+            }
+        }
+
+        let mut bevy_mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD);
+        bevy_mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+        bevy_mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+        bevy_mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+        bevy_mesh.insert_indices(Indices::U32(indices));
+
+        let child = commands.spawn((
+            Mesh3d(meshes.add(bevy_mesh)),
+            MeshMaterial3d(mat.clone()),
+            Transform::default(),
+        )).id();
+        commands.entity(venue).add_child(child);
+        mesh_count += 1;
+    }
+
+    info!("Venue FBX loaded: {} mesh(es) from '{}'", mesh_count, path);
     Ok(())
 }
 

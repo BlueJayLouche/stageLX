@@ -36,6 +36,7 @@ midir             = "0.9"
 rosc              = "0.5"
 tobj              = { version = "4", features = ["async"] }
 gltf              = "1"
+ufbx              = "0.10"
 
 [profile.release]
 lto = "thin"
