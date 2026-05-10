@@ -2,11 +2,12 @@ use bevy::prelude::*;
 use bevy_egui::egui::{self, Color32, Pos2, RichText, Stroke, Ui, Vec2};
 use stagelx_gdtf::{parse_mvr, export_mvr};
 use crate::VenueLoadState;
+use std::io::Read;
 use std::sync::{Arc, Mutex};
 
 use crate::theme::*;
 use crate::widgets;
-use crate::{FixtureLibraryRes, LoadVenueEvent, PatchRes, SpawnFixtureEvent};
+use crate::{FixtureLibraryRes, LoadMvrStructureEvent, LoadVenueEvent, MvrStructureObject, PatchRes, SpawnFixtureEvent};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Library Panel (docked / inline)
@@ -409,6 +410,62 @@ fn load_mvr(
         }
     };
 
+    // ── Extract structure geometry (SceneObject / Truss) ─────────────────────
+    let has_structure = !scene.scene_objects.is_empty() || !scene.trusses.is_empty();
+    if has_structure {
+        let temp_dir = std::env::temp_dir().join("stagelx_mvr_geometry");
+        let _ = std::fs::create_dir_all(&temp_dir);
+
+        let cursor = std::io::Cursor::new(&data);
+        if let Ok(mut archive) = zip::ZipArchive::new(cursor) {
+            // Pre-collect names for case-insensitive lookup.
+            let names: Vec<String> = (0..archive.len())
+                .filter_map(|i| archive.by_index(i).ok().map(|f| f.name().to_string()))
+                .collect();
+
+            let mut structure_objects = Vec::new();
+
+            let mut extract_geometry = |name: &str, position: [f32; 3], rotation: [f32; 3], geo: &stagelx_gdtf::MvrGeometry3D| {
+                let target_lower = geo.file_name.to_ascii_lowercase();
+                let zip_name = names.iter().find(|n| n.to_ascii_lowercase() == target_lower)?;
+                let mut file = archive.by_name(zip_name).ok()?;
+                let mut bytes = Vec::new();
+                file.read_to_end(&mut bytes).ok()?;
+                let temp_path = temp_dir.join(&geo.file_name);
+                std::fs::write(&temp_path, &bytes).ok()?;
+                let path_str = temp_path.to_str()?.to_string();
+                Some(MvrStructureObject {
+                    name: name.to_string(),
+                    file_path: path_str,
+                    position,
+                    rotation,
+                })
+            };
+
+            for obj in &scene.scene_objects {
+                for geo in &obj.geometries {
+                    if let Some(so) = extract_geometry(&obj.name, obj.position, obj.rotation, geo) {
+                        structure_objects.push(so);
+                    }
+                }
+            }
+            for truss in &scene.trusses {
+                for geo in &truss.geometries {
+                    if let Some(so) = extract_geometry(&truss.name, truss.position, truss.rotation, geo) {
+                        structure_objects.push(so);
+                    }
+                }
+            }
+
+            if !structure_objects.is_empty() {
+                let count = structure_objects.len();
+                commands.trigger(LoadMvrStructureEvent { objects: structure_objects });
+                bevy::log::info!("MVR structure: {} geometry object(s) extracted", count);
+            }
+        }
+    }
+
+    // ── Load embedded GDTF files ─────────────────────────────────────────────
     let mut name_to_id: std::collections::HashMap<String, String> = Default::default();
     for (filename, bytes) in &scene.gdtf_files {
         match res.library.load(bytes) {
@@ -422,6 +479,7 @@ fn load_mvr(
         }
     }
 
+    // ── Spawn fixtures ───────────────────────────────────────────────────────
     let mut count = 0usize;
     for mut inst in scene.fixture_instances {
         if let Some(real_id) = name_to_id.get(&inst.fixture_type_id) {

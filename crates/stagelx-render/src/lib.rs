@@ -15,7 +15,7 @@ use stagelx_core::{
     types::{DmxAddress, FixtureId},
 };
 use stagelx_patch::PatchRes;
-use stagelx_show::{FixtureLibraryRes, LoadVenueEvent, PerfDiagnosticsRes, VenueLoadState};
+use stagelx_show::{FixtureLibraryRes, LoadMvrStructureEvent, LoadVenueEvent, PerfDiagnosticsRes, VenueLoadState};
 use beam::{BeamMaterial, GoboLibrary, setup_gobos};
 use beam_sprite::BeamSpriteMaterial;
 use camera::{foh_camera_input, foh_camera_update};
@@ -40,6 +40,7 @@ impl Plugin for StageLxRenderPlugin {
             .add_observer(fixture::on_fixture_spawned)
             .add_observer(fixture::on_fixture_despawned)
             .add_observer(on_load_venue)
+            .add_observer(on_load_mvr_structure)
             .add_systems(
                 Startup,
                 (scene::setup_scene, setup_gobos, setup_beam_lod, spawn_demo_fixtures).chain(),
@@ -89,6 +90,22 @@ fn on_load_venue(
             venue_state.import_path.clear();
         }
         Err(e) => venue_state.import_error = Some(e),
+    }
+}
+
+// ─── LoadMvrStructureEvent observer ───────────────────────────────────────────
+
+fn on_load_mvr_structure(
+    trigger: On<LoadMvrStructureEvent>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    existing: Query<Entity, With<VenueRoot>>,
+) {
+    let event = trigger.event();
+    match venue::load_mvr_structure(&event.objects, &mut commands, &mut meshes, &mut materials, &existing) {
+        Ok(()) => {}
+        Err(e) => bevy::log::error!("MVR structure load error: {e}"),
     }
 }
 

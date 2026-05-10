@@ -21,6 +21,23 @@ pub struct LoadVenueEvent {
     pub offset: [f32; 3],
 }
 
+/// One structure object to load from an MVR file (SceneObject or Truss geometry).
+#[derive(Debug, Clone)]
+pub struct MvrStructureObject {
+    pub name: String,
+    /// Absolute path to the extracted geometry file in temp storage.
+    pub file_path: String,
+    pub position: [f32; 3],
+    pub rotation: [f32; 3],
+}
+
+/// Emitted by the Library UI after parsing an MVR file.
+/// The render plugin observes this and spawns the referenced geometry.
+#[derive(Event, Debug, Clone)]
+pub struct LoadMvrStructureEvent {
+    pub objects: Vec<MvrStructureObject>,
+}
+
 // ─── Programmer ───────────────────────────────────────────────────────────────
 
 /// Normalised programmer state — all channel values 0.0–1.0.

@@ -14,7 +14,8 @@ use std::collections::HashSet;
 pub use stagelx_patch::{DespawnFixtureEvent, PatchEditState, PatchRes, SpawnFixtureEvent};
 pub use stagelx_show::{
     BackCueEvent, CuePlayhead, CueStack, DeleteCueEvent, FixtureLibraryRes,
-    GoCueEvent, LoadVenueEvent, PerfDiagnosticsRes, Programmer, RecordCueEvent, VenueLoadState,
+    GoCueEvent, LoadMvrStructureEvent, LoadVenueEvent, MvrStructureObject,
+    PerfDiagnosticsRes, Programmer, RecordCueEvent, VenueLoadState,
 };
 use stagelx_io::artnet::ArtNetNodeTable;
 use stagelx_io::config::{ArtNetConfig, MidiConfig, OscConfig, SacnConfig, UsbConfig};

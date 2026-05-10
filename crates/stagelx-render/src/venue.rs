@@ -13,6 +13,7 @@ use bevy::{
     mesh::{Indices, PrimitiveTopology},
     prelude::*,
 };
+use stagelx_show::MvrStructureObject;
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -50,6 +51,68 @@ pub fn load_venue(
     }
 }
 
+/// Load MVR structure geometry (SceneObject / Truss) from extracted temp files.
+/// Replaces any previously loaded venue.
+pub fn load_mvr_structure(
+    objects: &[MvrStructureObject],
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    existing: &Query<Entity, With<VenueRoot>>,
+) -> Result<(), String> {
+    for entity in existing.iter() {
+        commands.entity(entity).despawn();
+    }
+
+    let venue = commands.spawn((
+        Transform::default(),
+        Visibility::default(),
+        VenueRoot,
+    )).id();
+
+    let mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.5, 0.5, 0.5),
+        perceptual_roughness: 0.8,
+        metallic: 0.0,
+        ..default()
+    });
+
+    for obj in objects {
+        let lower = obj.file_path.to_lowercase();
+
+        let child = commands.spawn((
+            Transform {
+                translation: Vec3::from_array(obj.position),
+                rotation: Quat::from_euler(
+                    EulerRot::ZYX,
+                    obj.rotation[0].to_radians(),
+                    obj.rotation[1].to_radians(),
+                    obj.rotation[2].to_radians(),
+                ),
+                ..default()
+            },
+            Visibility::default(),
+        )).id();
+        commands.entity(venue).add_child(child);
+
+        let count = if lower.ends_with(".obj") {
+            spawn_obj_meshes(&obj.file_path, child, commands, meshes, &mat)?
+        } else if lower.ends_with(".glb") || lower.ends_with(".gltf") {
+            spawn_glb_meshes(&obj.file_path, child, commands, meshes, &mat)?
+        } else if lower.ends_with(".fbx") {
+            spawn_fbx_meshes(&obj.file_path, child, commands, meshes, &mat)?
+        } else {
+            0
+        };
+
+        if count > 0 {
+            info!("MVR object '{}': {} mesh(es) from '{}'", obj.name, count, obj.file_path);
+        }
+    }
+
+    Ok(())
+}
+
 // ─── OBJ loader ──────────────────────────────────────────────────────────────
 
 fn load_obj(
@@ -59,9 +122,6 @@ fn load_obj(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
 ) -> Result<(), String> {
-    let (models, _mats) = tobj::load_obj(path, &tobj::GPU_LOAD_OPTIONS)
-        .map_err(|e| format!("OBJ load error: {e}"))?;
-
     let venue = commands.spawn((
         Transform::from_xyz(offset[0], offset[1], offset[2]),
         Visibility::default(),
@@ -74,6 +134,21 @@ fn load_obj(
         metallic: 0.0,
         ..default()
     });
+
+    let count = spawn_obj_meshes(path, venue, commands, meshes, &mat)?;
+    info!("Venue OBJ loaded: {} mesh(es) from '{}'", count, path);
+    Ok(())
+}
+
+fn spawn_obj_meshes(
+    path: &str,
+    parent: Entity,
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    mat: &Handle<StandardMaterial>,
+) -> Result<usize, String> {
+    let (models, _mats) = tobj::load_obj(path, &tobj::GPU_LOAD_OPTIONS)
+        .map_err(|e| format!("OBJ load error: {e}"))?;
 
     for model in &models {
         let m = &model.mesh;
@@ -106,11 +181,10 @@ fn load_obj(
             MeshMaterial3d(mat.clone()),
             Transform::default(),
         )).id();
-        commands.entity(venue).add_child(child);
+        commands.entity(parent).add_child(child);
     }
 
-    info!("Venue OBJ loaded: {} mesh(es) from '{}'", models.len(), path);
-    Ok(())
+    Ok(models.len())
 }
 
 // ─── GLB / glTF loader ────────────────────────────────────────────────────────
@@ -122,9 +196,6 @@ fn load_glb(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
 ) -> Result<(), String> {
-    let (doc, buffers, _images) = gltf::import(path)
-        .map_err(|e| format!("glTF load error: {e}"))?;
-
     let venue = commands.spawn((
         Transform::from_xyz(offset[0], offset[1], offset[2]),
         Visibility::default(),
@@ -137,6 +208,21 @@ fn load_glb(
         metallic: 0.0,
         ..default()
     });
+
+    let count = spawn_glb_meshes(path, venue, commands, meshes, &mat)?;
+    info!("Venue glTF loaded: {} primitive(s) from '{}'", count, path);
+    Ok(())
+}
+
+fn spawn_glb_meshes(
+    path: &str,
+    parent: Entity,
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    mat: &Handle<StandardMaterial>,
+) -> Result<usize, String> {
+    let (doc, buffers, _images) = gltf::import(path)
+        .map_err(|e| format!("glTF load error: {e}"))?;
 
     let mut mesh_count = 0usize;
     for mesh in doc.meshes() {
@@ -172,13 +258,12 @@ fn load_glb(
                 MeshMaterial3d(mat.clone()),
                 Transform::default(),
             )).id();
-            commands.entity(venue).add_child(child);
+            commands.entity(parent).add_child(child);
             mesh_count += 1;
         }
     }
 
-    info!("Venue glTF loaded: {} primitive(s) from '{}'", mesh_count, path);
-    Ok(())
+    Ok(mesh_count)
 }
 
 // ─── FBX loader ───────────────────────────────────────────────────────────────
@@ -190,12 +275,6 @@ fn load_fbx(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
 ) -> Result<(), String> {
-    let mut opts = ufbx::LoadOpts::default();
-    opts.generate_missing_normals = true;
-
-    let scene = ufbx::load_file(path, opts)
-        .map_err(|e| format!("FBX load error: {} — {}", e.description, e.info()))?;
-
     let venue = commands.spawn((
         Transform::from_xyz(offset[0], offset[1], offset[2]),
         Visibility::default(),
@@ -209,15 +288,30 @@ fn load_fbx(
         ..default()
     });
 
+    let count = spawn_fbx_meshes(path, venue, commands, meshes, &mat)?;
+    info!("Venue FBX loaded: {} mesh(es) from '{}'", count, path);
+    Ok(())
+}
+
+fn spawn_fbx_meshes(
+    path: &str,
+    parent: Entity,
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    mat: &Handle<StandardMaterial>,
+) -> Result<usize, String> {
+    let mut opts = ufbx::LoadOpts::default();
+    opts.generate_missing_normals = true;
+
+    let scene = ufbx::load_file(path, opts)
+        .map_err(|e| format!("FBX load error: {} — {}", e.description, e.info()))?;
+
     let mut mesh_count = 0usize;
     for mesh in &scene.meshes {
-
         if mesh.num_indices == 0 || mesh.num_faces == 0 {
             continue;
         }
 
-        // ufbx gives per-face-corner vertex attributes (num_indices total).
-        // Each face corner is already a unique vertex with its own normal/UV.
         let mut positions = Vec::with_capacity(mesh.num_indices);
         let mut normals = Vec::with_capacity(mesh.num_indices);
         let mut uvs = Vec::with_capacity(mesh.num_indices);
@@ -242,7 +336,6 @@ fn load_fbx(
             uvs.push(uv);
         }
 
-        // Triangulate faces (fan triangulation for n-gons).
         let mut indices = Vec::new();
         for face in mesh.faces.as_ref() {
             let n = face.num_indices as usize;
@@ -268,12 +361,11 @@ fn load_fbx(
             MeshMaterial3d(mat.clone()),
             Transform::default(),
         )).id();
-        commands.entity(venue).add_child(child);
+        commands.entity(parent).add_child(child);
         mesh_count += 1;
     }
 
-    info!("Venue FBX loaded: {} mesh(es) from '{}'", mesh_count, path);
-    Ok(())
+    Ok(mesh_count)
 }
 
 // ─── Normal computation ───────────────────────────────────────────────────────

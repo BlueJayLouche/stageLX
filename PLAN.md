@@ -603,14 +603,19 @@ MIDI input (`midir` + crossbeam); OSC input (`rosc`); MIDI + OSC config UI; MVR 
 
 ---
 
-### 6.5 Truss / Structure Geometry from MVR
+### 6.5 Truss / Structure Geometry from MVR ✅
 
 **Deferred from Phase 4.**
 
-- [ ] Parse `Truss` and `SceneObject` elements from MVR `GeneralSceneDescription.xml`
-- [ ] Load associated 3D models (GLB/OBJ/3DS) referenced by MVR
-- [ ] Render as static opaque geometry in venue layer
-- [ ] Apply `VenueLoadState::offset` to truss geometry
+- ✅ Parse `Truss` and `SceneObject` elements from MVR `GeneralSceneDescription.xml`
+- ✅ Parse `Geometry3D` references with `fileName` attribute
+- ✅ Load associated 3D models (GLB/OBJ/3DS) referenced by MVR
+- ✅ Extract geometry from MVR ZIP to temp directory during import
+- ✅ Render as static opaque geometry under `VenueRoot`
+- ✅ Reuse existing venue loaders (OBJ/GLB/FBX) via `spawn_*_meshes` helpers
+- ✅ Apply per-object `Matrix` transform (MVR Z-up → Bevy Y-up, mm → metres)
+
+**Architecture:** Follows `LoadVenueEvent` pattern — `LoadMvrStructureEvent` triggered by UI, observed by render plugin. Temp-file extraction avoids rewriting byte-based loaders.
 
 ---
 

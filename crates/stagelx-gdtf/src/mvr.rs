@@ -19,6 +19,32 @@ use crate::error::GdtfError;
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
+/// A 3D geometry reference inside a SceneObject or Truss.
+#[derive(Debug, Clone, Default)]
+pub struct MvrGeometry3D {
+    pub file_name: String,
+}
+
+/// A generic scene object (stage element, scenery, etc.).
+#[derive(Debug, Clone, Default)]
+pub struct MvrSceneObject {
+    pub name: String,
+    pub uuid: String,
+    pub position: [f32; 3],
+    pub rotation: [f32; 3],
+    pub geometries: Vec<MvrGeometry3D>,
+}
+
+/// A truss structure element.
+#[derive(Debug, Clone, Default)]
+pub struct MvrTruss {
+    pub name: String,
+    pub uuid: String,
+    pub position: [f32; 3],
+    pub rotation: [f32; 3],
+    pub geometries: Vec<MvrGeometry3D>,
+}
+
 /// A parsed MVR scene.
 #[derive(Debug, Default)]
 pub struct MvrScene {
@@ -28,6 +54,10 @@ pub struct MvrScene {
     pub gdtf_files: Vec<(String, Vec<u8>)>,
     /// Optional venue geometry file paths inside the MVR ZIP.
     pub geometry_files: Vec<String>,
+    /// Scene objects (stage elements, scenery).
+    pub scene_objects: Vec<MvrSceneObject>,
+    /// Truss structures.
+    pub trusses: Vec<MvrTruss>,
 }
 
 // ─── Parse entry point ────────────────────────────────────────────────────────
@@ -67,13 +97,15 @@ pub fn parse_mvr(data: &[u8]) -> Result<MvrScene, GdtfError> {
 
     // Parse GeneralSceneDescription.xml.
     let xml_content = read_case_insensitive(&mut archive, "GeneralSceneDescription.xml")?;
-    let fixture_instances = parse_scene_xml(&xml_content)?;
+    let ParsedElements { fixture_instances, scene_objects, trusses } = parse_scene_xml(&xml_content)?;
 
     Ok(MvrScene {
         name: String::new(),
         fixture_instances,
         gdtf_files,
         geometry_files,
+        scene_objects,
+        trusses,
     })
 }
 
@@ -90,18 +122,54 @@ struct MvrFixtureData {
     address_str:     String,
 }
 
+/// Intermediate scene-object data accumulated from XML events.
+#[derive(Default)]
+struct MvrSceneObjectData {
+    name:       String,
+    uuid:       String,
+    matrix_str: String,
+    geometries: Vec<MvrGeometry3D>,
+}
+
+/// Intermediate truss data accumulated from XML events.
+#[derive(Default)]
+struct MvrTrussData {
+    name:       String,
+    uuid:       String,
+    matrix_str: String,
+    geometries: Vec<MvrGeometry3D>,
+}
+
 #[derive(PartialEq)]
 enum TextTarget { None, GdtfSpec, GdtfMode, FixtureTypeId, Matrix, Address }
 
-fn parse_scene_xml(xml: &str) -> Result<Vec<FixtureInstance>, GdtfError> {
+/// Tracks which kind of element we are currently inside.
+enum ActiveElement {
+    None,
+    Fixture(MvrFixtureData),
+    SceneObject(MvrSceneObjectData),
+    Truss(MvrTrussData),
+}
+
+struct ParsedElements {
+    fixture_instances: Vec<FixtureInstance>,
+    scene_objects: Vec<MvrSceneObject>,
+    trusses: Vec<MvrTruss>,
+}
+
+fn parse_scene_xml(xml: &str) -> Result<ParsedElements, GdtfError> {
     let mut reader = XmlReader::from_str(xml);
     reader.config_mut().trim_text(true);
 
     let mut buf = Vec::new();
     let mut instances = Vec::new();
-    let mut current: Option<MvrFixtureData> = None;
+    let mut scene_objects = Vec::new();
+    let mut trusses = Vec::new();
+
+    let mut active = ActiveElement::None;
     let mut target = TextTarget::None;
-    let mut fixture_depth: u32 = 0; // tracks nesting inside <Fixture>
+    let mut depth: u32 = 0;          // nesting depth inside the active element
+    let mut in_geometries: bool = false;
 
     loop {
         match reader.read_event_into(&mut buf) {
@@ -117,45 +185,151 @@ fn parse_scene_xml(xml: &str) -> Result<Vec<FixtureInstance>, GdtfError> {
                                 _ => {}
                             }
                         }
-                        current = Some(data);
-                        fixture_depth = 1;
+                        active = ActiveElement::Fixture(data);
+                        depth = 1;
                     }
-                    b"GDTFSpec"       if current.is_some() => { target = TextTarget::GdtfSpec; }
-                    b"GDTFMode"       if current.is_some() => { target = TextTarget::GdtfMode; }
-                    b"FixtureTypeId"  if current.is_some() => { target = TextTarget::FixtureTypeId; }
-                    b"Matrix"         if current.is_some() => { target = TextTarget::Matrix; }
-                    b"Address"        if current.is_some() => { target = TextTarget::Address; }
+                    b"SceneObject" => {
+                        let mut data = MvrSceneObjectData::default();
+                        for attr in e.attributes().flatten() {
+                            match attr.key.as_ref() {
+                                b"name" | b"Name" => {
+                                    data.name = String::from_utf8_lossy(&attr.value).into_owned();
+                                }
+                                b"uuid" | b"UUID" => {
+                                    data.uuid = String::from_utf8_lossy(&attr.value).into_owned();
+                                }
+                                _ => {}
+                            }
+                        }
+                        active = ActiveElement::SceneObject(data);
+                        depth = 1;
+                    }
+                    b"Truss" => {
+                        let mut data = MvrTrussData::default();
+                        for attr in e.attributes().flatten() {
+                            match attr.key.as_ref() {
+                                b"name" | b"Name" => {
+                                    data.name = String::from_utf8_lossy(&attr.value).into_owned();
+                                }
+                                b"uuid" | b"UUID" => {
+                                    data.uuid = String::from_utf8_lossy(&attr.value).into_owned();
+                                }
+                                _ => {}
+                            }
+                        }
+                        active = ActiveElement::Truss(data);
+                        depth = 1;
+                    }
+                    b"Geometries" => {
+                        if matches!(active, ActiveElement::SceneObject(_) | ActiveElement::Truss(_)) {
+                            in_geometries = true;
+                        } else if !matches!(active, ActiveElement::None) {
+                            depth = depth.saturating_add(1);
+                        }
+                    }
+                    b"Geometry3D" => {
+                        if in_geometries {
+                            let mut file_name = String::new();
+                            for attr in e.attributes().flatten() {
+                                match attr.key.as_ref() {
+                                    b"fileName" | b"FileName" => {
+                                        file_name = String::from_utf8_lossy(&attr.value).into_owned();
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            let geo = MvrGeometry3D { file_name };
+                            match &mut active {
+                                ActiveElement::SceneObject(d) => d.geometries.push(geo),
+                                ActiveElement::Truss(d) => d.geometries.push(geo),
+                                _ => {}
+                            }
+                        } else if !matches!(active, ActiveElement::None) {
+                            depth = depth.saturating_add(1);
+                        }
+                    }
+                    b"GDTFSpec"       if !matches!(active, ActiveElement::None) => { target = TextTarget::GdtfSpec; }
+                    b"GDTFMode"       if !matches!(active, ActiveElement::None) => { target = TextTarget::GdtfMode; }
+                    b"FixtureTypeId"  if matches!(active, ActiveElement::Fixture(_)) => { target = TextTarget::FixtureTypeId; }
+                    b"Matrix"         if !matches!(active, ActiveElement::None) => { target = TextTarget::Matrix; }
+                    b"Address"        if matches!(active, ActiveElement::Fixture(_)) => { target = TextTarget::Address; }
                     _ => {
-                        if current.is_some() { fixture_depth = fixture_depth.saturating_add(1); }
+                        if !matches!(active, ActiveElement::None) {
+                            depth = depth.saturating_add(1);
+                        }
                     }
                 }
             }
 
             Ok(XmlEvent::Text(ref e)) => {
-                if let Some(ref mut data) = current {
+                if !matches!(active, ActiveElement::None) {
                     let text = e.unescape().map(|s| s.into_owned()).unwrap_or_default();
-                    match target {
-                        TextTarget::GdtfSpec      => data.gdtf_spec       = text,
-                        TextTarget::GdtfMode      => data.gdtf_mode        = text,
-                        TextTarget::FixtureTypeId => data.fixture_type_id  = text,
-                        TextTarget::Matrix        => data.matrix_str       = text,
-                        TextTarget::Address       => data.address_str      = text,
-                        TextTarget::None          => {}
+                    match &mut active {
+                        ActiveElement::Fixture(data) => {
+                            match target {
+                                TextTarget::GdtfSpec      => data.gdtf_spec       = text,
+                                TextTarget::GdtfMode      => data.gdtf_mode       = text,
+                                TextTarget::FixtureTypeId => data.fixture_type_id = text,
+                                TextTarget::Matrix        => data.matrix_str      = text,
+                                TextTarget::Address       => data.address_str     = text,
+                                TextTarget::None          => {}
+                            }
+                        }
+                        ActiveElement::SceneObject(data) => {
+                            match target {
+                                TextTarget::Matrix => data.matrix_str = text,
+                                _ => {}
+                            }
+                        }
+                        ActiveElement::Truss(data) => {
+                            match target {
+                                TextTarget::Matrix => data.matrix_str = text,
+                                _ => {}
+                            }
+                        }
+                        ActiveElement::None => {}
                     }
                 }
             }
 
             Ok(XmlEvent::End(ref e)) => {
                 target = TextTarget::None;
-                if e.name().as_ref() == b"Fixture" {
-                    if let Some(data) = current.take() {
-                        if let Some(inst) = convert_fixture(data, instances.len() as u32) {
-                            instances.push(inst);
+                match e.name().as_ref() {
+                    b"Fixture" => {
+                        if let ActiveElement::Fixture(data) = std::mem::replace(&mut active, ActiveElement::None) {
+                            if let Some(inst) = convert_fixture(data, instances.len() as u32) {
+                                instances.push(inst);
+                            }
+                        }
+                        depth = 0;
+                    }
+                    b"SceneObject" => {
+                        if let ActiveElement::SceneObject(data) = std::mem::replace(&mut active, ActiveElement::None) {
+                            if let Some(obj) = convert_scene_object(data) {
+                                scene_objects.push(obj);
+                            }
+                        }
+                        depth = 0;
+                    }
+                    b"Truss" => {
+                        if let ActiveElement::Truss(data) = std::mem::replace(&mut active, ActiveElement::None) {
+                            if let Some(t) = convert_truss(data) {
+                                trusses.push(t);
+                            }
+                        }
+                        depth = 0;
+                    }
+                    b"Geometries" => {
+                        in_geometries = false;
+                        if !matches!(active, ActiveElement::None) {
+                            depth = depth.saturating_sub(1);
                         }
                     }
-                    fixture_depth = 0;
-                } else if current.is_some() {
-                    fixture_depth = fixture_depth.saturating_sub(1);
+                    _ => {
+                        if !matches!(active, ActiveElement::None) {
+                            depth = depth.saturating_sub(1);
+                        }
+                    }
                 }
             }
 
@@ -166,16 +340,15 @@ fn parse_scene_xml(xml: &str) -> Result<Vec<FixtureInstance>, GdtfError> {
         buf.clear();
     }
 
-    Ok(instances)
+    Ok(ParsedElements { fixture_instances: instances, scene_objects, trusses })
 }
 
-// ─── Fixture conversion ───────────────────────────────────────────────────────
+// ─── Conversions ──────────────────────────────────────────────────────────────
 
 fn convert_fixture(data: MvrFixtureData, seq: u32) -> Option<FixtureInstance> {
     let fixture_type_id = if !data.fixture_type_id.is_empty() {
         data.fixture_type_id
     } else {
-        // Fallback: use the GDTF filename (without extension) as a key.
         data.gdtf_spec
             .rsplit('/')
             .next()
@@ -184,10 +357,7 @@ fn convert_fixture(data: MvrFixtureData, seq: u32) -> Option<FixtureInstance> {
             .to_string()
     };
 
-    // Parse DMX address "universe.channel" → DmxAddress.
     let (universe, channel) = parse_address(&data.address_str).unwrap_or((1, 1));
-
-    // Parse 4×4 column-major matrix: {u1,…,u4, v1,…,v4, w1,…,w4, o1,…,o4} (mm).
     let (position, rotation) = parse_matrix(&data.matrix_str);
 
     let name = if data.name.is_empty() {
@@ -204,7 +374,29 @@ fn convert_fixture(data: MvrFixtureData, seq: u32) -> Option<FixtureInstance> {
         address: DmxAddress::new(universe, channel),
         position,
         rotation,
-        channel_map: Default::default(), // computed after GDTF library load
+        channel_map: Default::default(),
+    })
+}
+
+fn convert_scene_object(data: MvrSceneObjectData) -> Option<MvrSceneObject> {
+    let (position, rotation) = parse_matrix(&data.matrix_str);
+    Some(MvrSceneObject {
+        name: data.name,
+        uuid: data.uuid,
+        position,
+        rotation,
+        geometries: data.geometries,
+    })
+}
+
+fn convert_truss(data: MvrTrussData) -> Option<MvrTruss> {
+    let (position, rotation) = parse_matrix(&data.matrix_str);
+    Some(MvrTruss {
+        name: data.name,
+        uuid: data.uuid,
+        position,
+        rotation,
+        geometries: data.geometries,
     })
 }
 
@@ -224,7 +416,7 @@ fn parse_address(s: &str) -> Option<(u16, u16)> {
 ///
 /// MVR coordinate system (MA3): X=right, Y=depth, Z=up.
 /// Bevy coordinate system: X=right, Y=up, Z=-depth.
-fn parse_matrix(s: &str) -> ([f32; 3], [f32; 3]) {
+pub fn parse_matrix(s: &str) -> ([f32; 3], [f32; 3]) {
     let inner = s.trim().trim_start_matches('{').trim_end_matches('}');
     let floats: Vec<f32> = inner
         .split(',')
@@ -244,21 +436,13 @@ fn parse_matrix(s: &str) -> ([f32; 3], [f32; 3]) {
     let position = [tx / 1000.0, tz / 1000.0, -ty / 1000.0];
 
     // Extract rotation from upper-left 3×3.
-    // Column-major columns: u=(0,1,2), v=(4,5,6), w=(8,9,10).
-    // Row-major R_mvr:
-    //   [[m0, m4, m8],
-    //    [m1, m5, m9],
-    //    [m2, m6, m10]]
-    // After coordinate transform (Z-up → Y-up), decompose ZYX euler in degrees.
     let r = [
         [floats[0], floats[4], floats[8]],
         [floats[1], floats[5], floats[9]],
         [floats[2], floats[6], floats[10]],
     ];
 
-    // Map to Bevy-space rotation matrix: swap row/col 1 and 2, negate Y-axis column.
-    // R_bevy = T * R_mvr * T^T  where T = diag(1,0,1, 0,1,0, 0,-1,0)
-    // Simplified: rb[i][j] = T[i][_] * R_mvr[_][_] * T[_][j]
+    // Map to Bevy-space rotation matrix.
     let rb = [
         [ r[0][0],  r[0][2], -r[0][1]],
         [ r[2][0],  r[2][2], -r[2][1]],

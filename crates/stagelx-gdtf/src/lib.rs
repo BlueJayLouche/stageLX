@@ -4,7 +4,7 @@ pub mod mvr;
 pub mod mvr_export;
 
 pub use gdtf::{parse_gdtf, GdtfFixtureType};
-pub use mvr::{parse_mvr, MvrScene};
+pub use mvr::{parse_mvr, MvrScene, MvrSceneObject, MvrTruss, MvrGeometry3D};
 pub use mvr_export::export_mvr;
 
 use std::collections::HashMap;
