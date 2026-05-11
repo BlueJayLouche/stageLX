@@ -27,8 +27,13 @@ use crate::supervisor::{IoSink, IoSource, IoSupervisor, create_tuned_udp_socket}
 pub const SACN_PORT: u16 = 5568;
 const MAX_RX_UNIVERSES: usize = 64;
 
-// Fixed Component Identifier for this source (ASCII "stageLX" padded).
-const CID: [u8; 16] = *b"stageLX\x00\x00\x00\x00\x00\x00\x00\x00\x01";
+// Fixed UUID4-format CID for stageLX (RFC 4122 §4.4).
+// Byte 6 high nibble = 4 (version 4); byte 8 high 2 bits = 10 (variant 1).
+// Value: 6d8c7e4a-3b5f-4e2d-b891-0a1c2d3e4f50
+const CID: [u8; 16] = [
+    0x6d, 0x8c, 0x7e, 0x4a, 0x3b, 0x5f, 0x4e, 0x2d,
+    0xb8, 0x91, 0x0a, 0x1c, 0x2d, 0x3e, 0x4f, 0x50,
+];
 // ACN Packet Identifier per ANSI E1.17.
 const ACN_ID: &[u8; 12] = b"ASC-E1.17\x00\x00\x00";
 
@@ -265,6 +270,8 @@ pub struct SacnState {
     tx_handle: Option<JoinHandle<()>>,
     /// Throttle bind retries to avoid log-spam when the port is busy.
     last_bind_attempt: Option<std::time::Instant>,
+    /// Universes for which we have already joined the multicast group.
+    joined_universes: std::collections::HashSet<u16>,
 }
 
 impl Default for SacnState {
@@ -280,6 +287,7 @@ impl Default for SacnState {
             rx_handle: None,
             tx_handle: None,
             last_bind_attempt: None,
+            joined_universes: std::collections::HashSet::new(),
         }
     }
 }
@@ -314,12 +322,14 @@ pub fn sacn_manage_socket(
         }
     }
 
-    // ── Multicast join for RX universe ────────────────────────────────────────
+    // ── Multicast join for RX universe (once per universe per socket) ─────────
     if cfg.rx_enabled {
         let rx_uni = if cfg.rx_universe == 0 { cfg.out_universe } else { cfg.rx_universe };
-        if rx_uni > 0 {
+        if rx_uni > 0 && !state.joined_universes.contains(&rx_uni) {
             if let Some(ref sock) = state.socket {
-                let _ = join_sacn_multicast(sock, rx_uni);
+                if join_sacn_multicast(sock, rx_uni).is_ok() {
+                    state.joined_universes.insert(rx_uni);
+                }
             }
         }
     }
@@ -404,6 +414,7 @@ pub fn sacn_manage_socket(
         state.tx_chan = None;
         state.rx_handle = None;
         state.tx_handle = None;
+        state.joined_universes.clear();
         stats.status = ProtocolStatus::Idle;
     }
 

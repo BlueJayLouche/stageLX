@@ -98,8 +98,7 @@ pub fn create_tuned_udp_socket(addr: SocketAddr) -> std::io::Result<UdpSocket> {
     socket.set_broadcast(true)?;
     socket.set_reuse_address(true)?;
     #[cfg(target_os = "macos")]
-    {
-    }
+    socket.set_reuse_port(true)?;
     socket.set_recv_buffer_size(4 * 1024 * 1024)?;
     socket.bind(&addr.into())?;
     Ok(socket.into())
