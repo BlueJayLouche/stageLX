@@ -294,6 +294,8 @@ fn io_panel_system(
         egui::Window::new("DMX I/O")
             .default_pos([1000.0, 100.0])
             .default_width(360.0)
+            .default_height(400.0)
+            .min_width(240.0)
             .resizable(true)
             .frame(float_frame)
             .show(egui_ctx, |ui| {
@@ -882,6 +884,8 @@ fn ui_root_system(
         egui::Window::new("Programmer")
             .default_pos([100.0, 100.0])
             .default_width(360.0)
+            .default_height(400.0)
+            .min_width(240.0)
             .resizable(true)
             .frame(float_frame)
             .show(egui_ctx, |ui| {
@@ -896,6 +900,7 @@ fn ui_root_system(
             .default_pos([400.0, 100.0])
             .default_width(580.0)
             .default_height(400.0)
+            .min_width(240.0)
             .resizable(true)
             .frame(float_frame)
             .show(egui_ctx, |ui| {
@@ -910,6 +915,7 @@ fn ui_root_system(
             .default_pos([700.0, 100.0])
             .default_width(420.0)
             .default_height(400.0)
+            .min_width(240.0)
             .resizable(true)
             .frame(float_frame)
             .show(egui_ctx, |ui| {
@@ -924,6 +930,7 @@ fn ui_root_system(
             .default_pos([100.0, 400.0])
             .default_width(300.0)
             .default_height(250.0)
+            .min_width(240.0)
             .resizable(true)
             .frame(float_frame)
             .show(egui_ctx, |ui| {

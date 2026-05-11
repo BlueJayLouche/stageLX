@@ -264,9 +264,11 @@ pub fn patch_panel_docked(
                     .get(type_ids.iter().position(|id| *id == edit.selected_type_id).unwrap_or(0))
                     .cloned()
                     .unwrap_or_default();
+                let type_label_short = truncate(&type_label, 20).to_string();
 
                 egui::ComboBox::from_label("")
-                    .selected_text(type_label)
+                    .width(120.0)
+                    .selected_text(type_label_short)
                     .show_ui(ui, |ui| {
                         for (id, label) in type_ids.iter().zip(type_labels.iter()) {
                             ui.selectable_value(&mut edit.selected_type_id, id.clone(), label);
@@ -284,7 +286,8 @@ pub fn patch_panel_docked(
                         edit.selected_mode = modes[0].clone();
                     }
                     egui::ComboBox::from_id_salt("mode_combo")
-                        .selected_text(&edit.selected_mode)
+                        .width(80.0)
+                        .selected_text(truncate(&edit.selected_mode, 12))
                         .show_ui(ui, |ui| {
                             for m in &modes {
                                 ui.selectable_value(&mut edit.selected_mode, m.clone(), m);
@@ -292,7 +295,7 @@ pub fn patch_panel_docked(
                         });
                 }
 
-                ui.add_sized([available_width * 0.15, 24.0], egui::TextEdit::singleline(&mut edit.new_name).hint_text("Fixture name"));
+                ui.add_sized([(available_width * 0.15).min(100.0), 24.0], egui::TextEdit::singleline(&mut edit.new_name).hint_text("Fixture name"));
                 ui.add_sized([60.0, 24.0], egui::TextEdit::singleline(&mut edit.universe_str).hint_text("Univ"));
                 ui.add_sized([60.0, 24.0], egui::TextEdit::singleline(&mut edit.channel_str).hint_text("Ch"));
 

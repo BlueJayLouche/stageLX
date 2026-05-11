@@ -189,7 +189,11 @@ fn artnet_config(ui: &mut Ui, cfg: &mut ArtNetConfig, nodes: &ArtNetNodeTable) {
             for node in nodes.nodes.values() {
                 ui.horizontal(|ui| {
                     widgets::status_dot(ui, widgets::DotState::Live);
-                    ui.label(RichText::new(&node.short_name).size(11.0).color(FG).strong());
+                    let max_name_width = (ui.available_width() - 90.0).max(40.0);
+                    ui.add_sized(
+                        [max_name_width, 16.0],
+                        egui::Label::new(RichText::new(&node.short_name).size(11.0).color(FG).strong()).truncate(),
+                    );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(RichText::new(node.ip.to_string()).size(9.0).monospace().color(FG_MUTED));
                     });

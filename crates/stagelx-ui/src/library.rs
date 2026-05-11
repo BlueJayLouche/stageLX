@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_egui::egui::{self, Color32, Pos2, RichText, Stroke, Ui, Vec2};
+use bevy_egui::egui::{self, Color32, FontId, Pos2, RichText, Stroke, Ui, Vec2};
 use stagelx_gdtf::{parse_mvr, export_mvr};
 use crate::VenueLoadState;
 use std::io::Read;
@@ -96,43 +96,75 @@ fn fixtures_tab(
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
                     // Header
-                    ui.horizontal(|ui| {
-                        ui.set_min_size(Vec2::new(available_width, header_height));
-                        let cols = [available_width * 0.30, available_width * 0.35, 100.0, 60.0];
-                        let headers = [("Manufacturer", font_body()), ("Model", font_body()), ("Modes", font_body()), ("Used", font_body())];
-                        for ((h, font_id), col_w) in headers.iter().zip(cols.iter()) {
-                            let rect = ui.available_rect_before_wrap();
-                            ui.painter().text(
-                                Pos2::new(rect.min.x, rect.center().y),
-                                egui::Align2::LEFT_CENTER,
+                    {
+                        let (rect, _) = ui.allocate_exact_size(Vec2::new(available_width, header_height), egui::Sense::hover());
+                        let painter = ui.painter();
+                        let cols = compute_library_columns(available_width);
+                        let mut x = rect.min.x;
+                        let headers = [("Manufacturer", egui::Align2::LEFT_CENTER), ("Model", egui::Align2::LEFT_CENTER), ("Modes", egui::Align2::LEFT_CENTER), ("Used", egui::Align2::RIGHT_CENTER)];
+                        for (i, (h, align)) in headers.iter().enumerate() {
+                            let col_x = x + if *align == egui::Align2::RIGHT_CENTER { cols[i] - 4.0 } else { 4.0 };
+                            painter.text(
+                                Pos2::new(col_x, rect.center().y),
+                                *align,
                                 *h,
-                                font_id.clone(),
+                                font_body(),
                                 FG_MUTED,
                             );
-                            ui.add_space((col_w - 40.0).max(0.0));
+                            x += cols[i];
                         }
-                    });
+                    }
 
                     for ft in res.library.all() {
-                        ui.horizontal(|ui| {
-                            ui.set_min_size(Vec2::new(available_width, row_height));
-                            let used = patch.0.fixtures().filter(|f| f.fixture_type_id == ft.fixture_type_id).count();
-                            ui.label(body_row_secondary(&ft.manufacturer));
-                            ui.add_space((available_width * 0.30 - 60.0).max(0.0));
-                            ui.label(body_row(&ft.name));
-                            ui.add_space((available_width * 0.35 - 60.0).max(0.0));
-                            let first_mode_ch = ft.dmx_modes.first().map(|m| m.channels.len()).unwrap_or(0);
-                            ui.label(RichText::new(format!("{} · {}ch", ft.dmx_modes.len(), first_mode_ch)).size(10.0).monospace().color(FG_MUTED));
-                            ui.add_space(60.0);
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if used > 0 {
-                                    ui.label(RichText::new(format!("{}", used)).size(11.0).monospace().color(ACCENT));
-                                } else {
-                                    ui.label(RichText::new("—").size(11.0).monospace().color(FG_FAINT));
-                                }
-                            });
-                        });
-                        ui.painter().line_segment([Pos2::new(ui.min_rect().min.x, ui.cursor().min.y), Pos2::new(ui.min_rect().max.x, ui.cursor().min.y)], Stroke::new(1.0, ROW_BORDER));
+                        let (rect, _) = ui.allocate_exact_size(Vec2::new(available_width, row_height), egui::Sense::hover());
+                        let painter = ui.painter();
+                        let cols = compute_library_columns(available_width);
+                        let mut x = rect.min.x;
+                        let used = patch.0.fixtures().filter(|f| f.fixture_type_id == ft.fixture_type_id).count();
+
+                        // Manufacturer
+                        painter.text(
+                            Pos2::new(x + 4.0, rect.center().y),
+                            egui::Align2::LEFT_CENTER,
+                            truncate(&ft.manufacturer, 20),
+                            font_body(),
+                            FG_SECONDARY,
+                        );
+                        x += cols[0];
+
+                        // Model
+                        painter.text(
+                            Pos2::new(x + 4.0, rect.center().y),
+                            egui::Align2::LEFT_CENTER,
+                            truncate(&ft.name, 24),
+                            font_body(),
+                            FG,
+                        );
+                        x += cols[1];
+
+                        // Modes
+                        let first_mode_ch = ft.dmx_modes.first().map(|m| m.channels.len()).unwrap_or(0);
+                        painter.text(
+                            Pos2::new(x + 4.0, rect.center().y),
+                            egui::Align2::LEFT_CENTER,
+                            format!("{} · {}ch", ft.dmx_modes.len(), first_mode_ch),
+                            FontId::monospace(10.0),
+                            FG_MUTED,
+                        );
+                        x += cols[2];
+
+                        // Used
+                        let used_text = if used > 0 { format!("{}", used) } else { "—".to_string() };
+                        let used_color = if used > 0 { ACCENT } else { FG_FAINT };
+                        painter.text(
+                            Pos2::new(x + cols[3] - 4.0, rect.center().y),
+                            egui::Align2::RIGHT_CENTER,
+                            used_text,
+                            FontId::monospace(11.0),
+                            used_color,
+                        );
+
+                        painter.line_segment([Pos2::new(rect.min.x, rect.max.y), Pos2::new(rect.max.x, rect.max.y)], Stroke::new(1.0, ROW_BORDER));
                     }
                 });
         });
@@ -498,4 +530,22 @@ fn load_mvr(
     res.mvr_import_error = None;
     res.mvr_import_path.clear();
     bevy::log::info!("MVR import complete: {} fixtures added from '{}'", count, path);
+}
+
+fn compute_library_columns(full_width: f32) -> [f32; 4] {
+    let fixed = 70.0 + 40.0; // Modes + Used
+    let remainder = (full_width - fixed).max(0.0);
+    [
+        remainder * 0.45,  // Manufacturer
+        remainder * 0.55,  // Model
+        70.0,              // Modes
+        40.0,              // Used
+    ]
+}
+
+fn truncate(s: &str, max: usize) -> &str {
+    match s.char_indices().nth(max) {
+        Some((idx, _)) => &s[..idx],
+        None => s,
+    }
 }

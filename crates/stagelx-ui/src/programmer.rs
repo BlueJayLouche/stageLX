@@ -224,12 +224,14 @@ pub fn programmer_panel_docked(
 
     // Swatch grid — reuses color_presets defined above
     let colors = color_presets;
+    let swatch_width = 42.0;
+    let items_per_row = ((available_width / swatch_width).floor() as usize).max(4);
 
     let mut selected_swatch = None;
     for (i, (_name, _color)) in colors.iter().enumerate() {
-        if i % 8 == 0 {
+        if i % items_per_row == 0 {
             ui.horizontal(|ui| {
-                for j in 0..8 {
+                for j in 0..items_per_row {
                     if let Some((name, color)) = colors.get(i + j) {
                         let [r, g, b] = *color;
                         let is_selected = (prog.color[0] - r).abs() < 0.01
