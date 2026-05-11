@@ -158,6 +158,11 @@ fn artnet_config(ui: &mut Ui, cfg: &mut ArtNetConfig, nodes: &ArtNetNodeTable) {
     config_row(ui, "Dest", |ui| {
         ui.add_sized([160.0, 24.0], egui::TextEdit::singleline(&mut cfg.dest_ip).hint_text("255.255.255.255").text_color(FG));
     });
+    config_row(ui, "Mode", |ui| {
+        let mut tx = cfg.tx_enabled;
+        widgets::toggle(ui, &mut tx, "TX");
+        cfg.tx_enabled = tx;
+    });
     config_row(ui, "Universe", |ui| {
         ui.add(egui::DragValue::new(&mut cfg.out_universe).range(0_u16..=32767_u16));
         ui.label(RichText::new("0–32767").size(10.0).monospace().color(FG_FAINT));

@@ -7,7 +7,7 @@ use bevy::prelude::*;
 
 // ─── Art-Net ──────────────────────────────────────────────────────────────────
 
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub struct ArtNetConfig {
     /// Local IP to bind (empty = 0.0.0.0).
     pub ip: String,
@@ -15,12 +15,28 @@ pub struct ArtNetConfig {
     pub out_universe: u16,
     /// Destination IP for TX. Empty = 255.255.255.255 (limited broadcast).
     pub dest_ip: String,
+    /// Enable Art-Net output.
+    pub tx_enabled: bool,
     /// Enable incoming Art-Net listener.
     pub rx_enabled: bool,
     /// Comma-separated source IPs to accept for RX. Empty = accept all.
     pub allowed_sources: String,
     /// Enable Art-Net node discovery (ArtPoll/ArtPollReply).
     pub discovery_enabled: bool,
+}
+
+impl Default for ArtNetConfig {
+    fn default() -> Self {
+        Self {
+            ip: String::new(),
+            out_universe: 0,
+            dest_ip: String::new(),
+            tx_enabled: true,
+            rx_enabled: false,
+            allowed_sources: String::new(),
+            discovery_enabled: false,
+        }
+    }
 }
 
 // ─── sACN (E1.31) ─────────────────────────────────────────────────────────────

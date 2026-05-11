@@ -270,9 +270,30 @@ pub fn artnet_manage_socket(
     mut state: ResMut<ArtNetState>,
     cfg: Res<ArtNetConfig>,
     supervisor: Res<IoSupervisor>,
+    mut stats: ResMut<ArtNetStats>,
 ) {
+    let wants_io = cfg.tx_enabled || cfg.rx_enabled || cfg.discovery_enabled;
+
+    // ── Release socket when nothing is needed ─────────────────────────────────
+    if !wants_io && state.socket.is_some() {
+        if let Some(shutdown) = state.rx_shutdown.take() {
+            let _ = shutdown.try_send(());
+        }
+        if let Some(shutdown) = state.tx_shutdown.take() {
+            let _ = shutdown.try_send(());
+        }
+        state.socket = None;
+        state.rx_chan = None;
+        state.tx_chan = None;
+        state.rx_handle = None;
+        state.tx_handle = None;
+        stats.status = ProtocolStatus::Idle;
+        info!("Art-Net socket released (all IO disabled)");
+        return;
+    }
+
     // ── Create socket if missing ──────────────────────────────────────────────
-    if state.socket.is_none() {
+    if wants_io && state.socket.is_none() {
         let now = std::time::Instant::now();
         let should_try = state.last_bind_attempt.is_none_or(|t| {
             now.duration_since(t).as_secs_f32() >= 1.0
@@ -319,10 +340,13 @@ pub fn artnet_manage_socket(
         }
         state.rx_chan = None;
         state.rx_handle = None;
+        if state.tx_chan.is_none() {
+            stats.status = ProtocolStatus::Idle;
+        }
     }
 
-    // ── Start TX thread when socket exists ────────────────────────────────────
-    if state.socket.is_some() && state.tx_chan.is_none() {
+    // ── Start TX thread when enabled ──────────────────────────────────────────
+    if cfg.tx_enabled && state.socket.is_some() && state.tx_chan.is_none() {
         let dest_ip: IpAddr = cfg
             .dest_ip
             .trim()
@@ -342,13 +366,16 @@ pub fn artnet_manage_socket(
         }
     }
 
-    // ── Stop TX thread when socket lost ───────────────────────────────────────
-    if state.socket.is_none() && state.tx_chan.is_some() {
+    // ── Stop TX thread when disabled ───────────────────────────────────────────
+    if !cfg.tx_enabled && state.tx_chan.is_some() {
         if let Some(shutdown) = state.tx_shutdown.take() {
             let _ = shutdown.try_send(());
         }
         state.tx_chan = None;
         state.tx_handle = None;
+        if state.rx_chan.is_none() {
+            stats.status = ProtocolStatus::Idle;
+        }
     }
 
     // ── Send ArtPoll every 3 s when discovery enabled ─────────────────────────

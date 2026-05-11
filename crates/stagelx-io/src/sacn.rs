@@ -291,6 +291,7 @@ pub fn sacn_manage_socket(
     mut state: ResMut<SacnState>,
     cfg: Res<SacnConfig>,
     supervisor: Res<IoSupervisor>,
+    mut stats: ResMut<SacnStats>,
 ) {
     let wants_io = cfg.tx_enabled || cfg.rx_enabled;
 
@@ -347,6 +348,9 @@ pub fn sacn_manage_socket(
         }
         state.rx_chan = None;
         state.rx_handle = None;
+        if state.tx_chan.is_none() {
+            stats.status = ProtocolStatus::Idle;
+        }
     }
 
     // ── Start TX thread when enabled ──────────────────────────────────────────
@@ -381,6 +385,9 @@ pub fn sacn_manage_socket(
         }
         state.tx_chan = None;
         state.tx_handle = None;
+        if state.rx_chan.is_none() {
+            stats.status = ProtocolStatus::Idle;
+        }
     }
 
     // ── Release socket when both TX and RX are disabled ───────────────────────
@@ -397,6 +404,7 @@ pub fn sacn_manage_socket(
         state.tx_chan = None;
         state.rx_handle = None;
         state.tx_handle = None;
+        stats.status = ProtocolStatus::Idle;
     }
 
     // ── Sync thread-local drops into the supervisor ───────────────────────────

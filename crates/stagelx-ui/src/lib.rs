@@ -205,8 +205,7 @@ impl Plugin for StageLxUiPlugin {
             .init_resource::<ShowMeta>()
             .init_resource::<OpenShowDialog>()
             .init_resource::<FontsInstalled>()
-            .add_systems(EguiPrimaryContextPass, ui_root_system)
-            .add_systems(EguiPrimaryContextPass, io_panel_system)
+            .add_systems(EguiPrimaryContextPass, (io_panel_system, ui_root_system).chain())
             .add_systems(Update, sync_midi_target);
     }
 }
@@ -228,7 +227,9 @@ fn io_panel_system(
     midi_target: Res<MidiTarget>,
     mut osc_cfg: ResMut<OscConfig>,
     osc_stats: Res<OscStats>,
+    app_mode: Res<AppMode>,
 ) {
+    let show_io = matches!(*app_mode, AppMode::Program | AppMode::Setup);
     let egui_ctx = ctx.ctx_mut().expect("egui context");
 
     let float_frame = egui::Frame::window(&egui_ctx.style())
@@ -242,7 +243,7 @@ fn io_panel_system(
         });
 
     // ── Right rail (DMX I/O) ──────────────────────────────────────────────────
-    if !layout.detached.contains(&PanelKind::Io) {
+    if show_io && !layout.detached.contains(&PanelKind::Io) {
         egui::SidePanel::right("right_rail")
             .exact_width(320.0)
             .frame(egui::Frame::new().fill(BG_CHROME).inner_margin(egui::Margin::same(0)))
@@ -289,7 +290,7 @@ fn io_panel_system(
     }
 
     // ── Detached floating IO window ───────────────────────────────────────────
-    if layout.detached.contains(&PanelKind::Io) {
+    if show_io && layout.detached.contains(&PanelKind::Io) {
         egui::Window::new("DMX I/O")
             .default_pos([1000.0, 100.0])
             .default_width(360.0)
@@ -381,6 +382,11 @@ fn ui_root_system(
     let venue_state = &mut *state.venue;
     let app_mode = &mut *state.app_mode;
     let fonts_installed = &mut *state.fonts;
+
+    // Mode-based panel visibility.
+    let show_left_rail = matches!(*app_mode, AppMode::Program | AppMode::Run);
+    let show_bottom_strip = matches!(*app_mode, AppMode::Program | AppMode::Patch | AppMode::Setup);
+    let run_mode = *app_mode == AppMode::Run;
     let Ok(window) = windows.single() else { return };
     let scale_factor = window.scale_factor();
     let egui_ctx = ctx.ctx_mut().expect("egui context");
@@ -492,9 +498,9 @@ fn ui_root_system(
 
                 // Right-aligned section — placed from right edge inward
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    // Settings gear
+                    // Settings gear — toggles status bar visibility
                     if ui.add_sized([24.0, 24.0], egui::Button::new("⚙").fill(Color32::TRANSPARENT).stroke(Stroke::NONE)).clicked() {
-                        // TODO: settings
+                        layout.show_status_bar = !layout.show_status_bar;
                     }
                     ui.add_space(12.0);
 
@@ -597,7 +603,7 @@ fn ui_root_system(
     }
 
     // ── Left rail (Cue + Programmer) ──────────────────────────────────────────
-    if !layout.detached.contains(&PanelKind::Programmer) || !layout.detached.contains(&PanelKind::Cue) {
+    if show_left_rail && (!layout.detached.contains(&PanelKind::Programmer) || !layout.detached.contains(&PanelKind::Cue)) {
         egui::SidePanel::left("left_rail")
             .exact_width(300.0)
             .frame(egui::Frame::new().fill(BG_CHROME).inner_margin(egui::Margin::same(0)))
@@ -669,7 +675,7 @@ fn ui_root_system(
         .frame(egui::Frame::new().fill(Color32::TRANSPARENT))
         .show(egui_ctx, |ui| {
             let full_rect = ui.available_rect_before_wrap();
-            let bottom_height = 248.0f32;
+            let bottom_height = if show_bottom_strip { 248.0f32 } else { 0.0 };
             let viewport_rect = Rect::from_min_max(
                 full_rect.min,
                 Pos2::new(full_rect.max.x, full_rect.max.y - bottom_height),
@@ -776,6 +782,9 @@ fn ui_root_system(
             });
 
             // Bottom strip: Patch + Library
+            if !show_bottom_strip {
+                return;
+            }
             ui.scope_builder(egui::UiBuilder::new().max_rect(bottom_rect), |ui| {
                 ui.painter().rect_filled(bottom_rect, 0.0, BG_APP);
                 ui.painter().line_segment([Pos2::new(bottom_rect.min.x, bottom_rect.min.y), Pos2::new(bottom_rect.max.x, bottom_rect.min.y)], Stroke::new(1.0, BORDER));
@@ -882,7 +891,7 @@ fn ui_root_system(
                 }
             });
     }
-    if layout.detached.contains(&PanelKind::Patch) {
+    if !run_mode && layout.detached.contains(&PanelKind::Patch) {
         egui::Window::new("Patch")
             .default_pos([400.0, 100.0])
             .default_width(580.0)
@@ -896,7 +905,7 @@ fn ui_root_system(
                 }
             });
     }
-    if layout.detached.contains(&PanelKind::Library) {
+    if !run_mode && layout.detached.contains(&PanelKind::Library) {
         egui::Window::new("Library")
             .default_pos([700.0, 100.0])
             .default_width(420.0)
