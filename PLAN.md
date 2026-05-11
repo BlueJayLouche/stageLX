@@ -758,6 +758,11 @@ Suggested `.gitignore`: standard Rust gitignore + `*.gdtf` test files (large bin
 
 ## Changelog
 
+### 2026-05-11 — UI layout refactor
+- **Panel layout restructure:** DMX I/O moved from inline bottom strip to dedicated `SidePanel::right` (420 px). Patch + Library promoted from inline `CentralPanel` scope to `TopBottomPanel::bottom` (248 px). CentralPanel now contains viewports only.
+- **System merge:** `io_panel_system` merged into `ui_root_system` via new `IoParams` `SystemParam` (keeps parameter count under Bevy's limit).
+- **Detached window fixes:** Prevented infinite expansion via `search_input` margin fix, `ScrollArea` inner-width usage, toolbar chip sizing, and `max_height` caps on programmer/cue/IO node lists. All detached windows receive `.default_height()` and `.min_width(240.0)`.
+
 ### 2026-05-10 — Phase 6.1–6.7 complete
 - **6.1 Crate split:** `stagelx-state` → `stagelx-patch` + `stagelx-show`. 8 crates in workspace.
 - **6.2 IO formalisation:** All transports implement `IoSource`/`IoSink`. `socket2` tuning. Overflow warnings.

@@ -27,6 +27,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Per-frame allocation ban enforced in LOD and DMX engine systems.
 - All 56 UI audit items from Phase 5 resolved; zero compiler warnings.
 
+### Changed
+- **UI layout refactor**: DMX I/O panel moved from embedded bottom strip to dedicated `SidePanel::right` (420 px). Patch + Library promoted from inline `CentralPanel` scope to `TopBottomPanel::bottom` (248 px). CentralPanel now contains viewports only. `io_panel_system` merged into `ui_root_system` via new `IoParams` `SystemParam`.
+
+### Fixed
+- Detached windows no longer expand infinitely — `search_input` frame margin capped, `ScrollArea` uses inner width, toolbar chip sizing constrained, programmer/cue/IO node lists capped with `max_height`/`ScrollArea`.
+- All detached windows receive `.default_height()` and `.min_width(240.0)` constraints.
+
 ### Known issues
 - `paste` crate (transitive via `bevy` → `wgpu` → `metal`) is unmaintained per RUSTSEC-2024-0436. Accepted pending Bevy upgrade.
 - wgpu timestamp queries for GPU pass timing deferred (requires custom render node).

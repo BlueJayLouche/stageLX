@@ -88,10 +88,10 @@ All feature crates (`io`, `render`) are leaf nodes — none depend on each other
 |---|---|
 | **Programmer** | Left rail — intensity, position, colour, gobo, effects |
 | **Cue** | Left rail — cue list, GO / BACK / RECORD |
-| **DMX I/O** | Left rail — Art-Net / sACN / USB / MIDI / OSC config |
-| **3D Viewport** | Centre — FoH camera, beam/gobo render |
-| **Patch** | Bottom — fixture list, address assignment, range select |
-| **Library** | Bottom — GDTF/MVR/Venue import |
+| **DMX I/O** | Right rail — Art-Net / sACN / USB / MIDI / OSC config |
+| **3D Viewport** | Centre — FoH + top + side cameras |
+| **Patch** | Bottom strip — fixture list, address assignment, range select |
+| **Library** | Bottom strip — GDTF/MVR/Venue import |
 
 All panels support minimize and detach (float as independent windows).
 
