@@ -1,12 +1,12 @@
-use std::collections::HashMap;
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use crate::fixture::FixtureInstance;
 use crate::types::FixtureId;
 
-/// Maps fixture IDs to their patched instances.
+/// Maps fixture IDs to their patched instances in insertion order.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Patch {
-    fixtures: HashMap<FixtureId, FixtureInstance>,
+    fixtures: IndexMap<FixtureId, FixtureInstance>,
     next_id: u32,
 }
 
@@ -20,7 +20,7 @@ impl Patch {
     }
 
     pub fn remove(&mut self, id: FixtureId) -> Option<FixtureInstance> {
-        self.fixtures.remove(&id)
+        self.fixtures.shift_remove(&id)
     }
 
     pub fn get(&self, id: FixtureId) -> Option<&FixtureInstance> {

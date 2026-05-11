@@ -28,6 +28,8 @@ bevy              = { version = "0.18.0" }
 bevy_egui         = { version = "0.39.1" }
 # tokio removed — project uses sync threads + crossbeam (see PLAN.md Rule 17)
 crossbeam-channel = "0.5"
+dirs              = "5"
+indexmap          = { version = "2", features = ["serde"] }
 thiserror         = "2"
 serde             = { version = "1", features = ["derive"] }
 zip               = "2"
@@ -36,7 +38,7 @@ image             = { version = "0.25", default-features = false, features = ["p
 serialport        = "4"
 midir             = "0.9"
 rosc              = "0.5"
-socket2           = "0.5"
+socket2           = { version = "0.5", features = ["all"] }
 tobj              = { version = "4", features = ["async"] }
 gltf              = "1"
 ufbx              = "0.10"

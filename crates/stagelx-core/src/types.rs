@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Unique identifier for a patched fixture instance.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct FixtureId(pub u32);
 
 /// A DMX address: universe + 1-based channel number (1–512).

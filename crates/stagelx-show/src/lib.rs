@@ -93,6 +93,18 @@ pub struct FixtureLibraryRes {
     pub mvr_import_error: Option<String>,
 }
 
+// ─── ShowName ─────────────────────────────────────────────────────────────────
+
+/// The name of the currently open show, displayed in the title bar.
+#[derive(Resource, Debug, Clone)]
+pub struct ShowName(pub String);
+
+impl Default for ShowName {
+    fn default() -> Self {
+        Self("Untitled Show".into())
+    }
+}
+
 // ─── VenueLoadState ───────────────────────────────────────────────────────────
 
 /// UI state for the venue loader (moved from stagelx-render per Rule 21).

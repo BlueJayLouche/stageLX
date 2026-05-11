@@ -368,9 +368,12 @@ pub fn on_load_cue_into_programmer(
     let idx = trigger.event().0;
     let Some(cue) = stack.cues.get(idx) else { return };
 
-    // Use the first fixture's values (all fixtures share the same values for
-    // programmer-recorded cues; for stage-captured cues, load the first one).
-    let values = cue.snapshot.values().next().cloned().unwrap_or_default();
+    // For programmer-recorded cues all fixtures share the same values.
+    // For stage-captured cues, load the lowest-ID fixture as a stable representative.
+    let values = cue.snapshot.iter()
+        .min_by_key(|(id, _)| *id)
+        .map(|(_, v)| v.clone())
+        .unwrap_or_default();
 
     programmer.dimmer = values.dimmer;
     programmer.pan = values.pan;
