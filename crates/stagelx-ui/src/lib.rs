@@ -204,6 +204,7 @@ impl Plugin for StageLxUiPlugin {
             .init_resource::<CueStack>()
             .init_resource::<CuePlayhead>()
             .init_resource::<stagelx_show::CaptureMode>()
+            .init_resource::<stagelx_show::ShowName>()
             // IO config/stats are initialised by stagelx_io::IoPlugin
             .init_resource::<VenueLoadState>()
             .init_resource::<UiLayoutState>()

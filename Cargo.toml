@@ -21,7 +21,7 @@ stagelx-show   = { path = "crates/stagelx-show" }
 stagelx-io     = { path = "crates/stagelx-io" }
 stagelx-render = { path = "crates/stagelx-render" }
 stagelx-ui     = { path = "crates/stagelx-ui" }
-ds3            = { path = "../3ds-rs" }
+ds3            = { git = "https://github.com/BlueJayLouche/3ds-rs", rev = "d83b7921eab23a607443c4cd277a9d9878e519c3" }
 
 # Shared external deps
 bevy              = { version = "0.18.0" }
