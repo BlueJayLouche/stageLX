@@ -5,13 +5,13 @@ use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
 use bevy::log::LogPlugin;
 use bevy::render::camera::CameraRenderGraph;
 use bevy_egui::{EguiContext, EguiGlobalSettings, EguiPlugin, PrimaryEguiContext};
-use stagelx_dmx::{cue_to_dmx, on_record_stage_cue};
-use stagelx_io::{IoPlugin, dmx_engine_tick};
+use stagelx_dmx::on_record_stage_cue;
+use stagelx_io::IoPlugin;
 use stagelx_render::StageLxRenderPlugin;
 use stagelx_show::{
-    auto_load_show_on_startup,
+    advance_cue_fade, auto_load_show_on_startup,
     on_back_cue, on_delete_cue, on_go_cue, on_load_cue_into_programmer,
-    on_load_show, on_record_cue, on_save_show, on_update_cue,
+    on_load_show, on_new_show, on_record_cue, on_save_show, on_update_cue,
 };
 use stagelx_ui::StageLxUiPlugin;
 
@@ -71,11 +71,16 @@ fn main() {
         .add_observer(on_update_cue)
         .add_observer(on_save_show)
         .add_observer(on_load_show)
+        .add_observer(on_new_show)
         .add_observer(on_go_cue)
         .add_observer(on_back_cue)
         .add_observer(on_delete_cue)
-        // Cue playback (priority 150) writes before engine merge.
-        .add_systems(FixedUpdate, cue_to_dmx.before(dmx_engine_tick))
+        // Cues output entirely through the programmer (priority 200): GO/BACK
+        // copy the cue into fixture_values and advance_cue_fade interpolates there.
+        // The old priority-150 cue_to_dmx source is intentionally NOT scheduled —
+        // it double-asserted cue values and survived a programmer clear, leaving
+        // fixtures (e.g. a motor channel) stuck with no way to override.
+        .add_systems(Update, advance_cue_fade)
         .run();
 }
 

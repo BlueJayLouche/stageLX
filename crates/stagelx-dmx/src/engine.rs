@@ -45,6 +45,9 @@ impl DmxEngine {
         priority: u8,
         strategy: MergeStrategy,
     ) -> &mut DmxSource {
+        // Always mark dirty — the caller is about to write universe data and
+        // tick() must re-scan sources to discover newly-populated universes.
+        self.dirty = true;
         if let Some(pos) = self.sources.iter().position(|s| s.name == name) {
             return &mut self.sources[pos];
         }
@@ -55,7 +58,6 @@ impl DmxEngine {
             strategy,
             universes: UniverseSet::default(),
         });
-        self.dirty = true;
         &mut self.sources[pos]
     }
 

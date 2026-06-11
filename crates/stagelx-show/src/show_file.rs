@@ -108,6 +108,7 @@ impl ShowFile {
 /// Events for show file I/O.
 use bevy::prelude::*;
 use crate::VenueLoadState;
+use stagelx_patch::DespawnFixtureEvent;
 
 /// Triggered by UI (Ctrl+S or File → Save).
 #[derive(Event, Debug, Clone)]
@@ -118,6 +119,11 @@ pub struct SaveShowEvent;
 pub struct LoadShowEvent {
     pub path: String,
 }
+
+/// Triggered by UI (Cmd+N or File → New Show).
+/// Clears everything and resets to a blank show.
+#[derive(Event, Debug, Clone)]
+pub struct NewShowEvent;
 
 /// Observer: saves the current show state to `show.slx`.
 pub fn on_save_show(
@@ -165,6 +171,29 @@ pub fn on_load_show(
     } else {
         warn!("Failed to load show from {}", path);
     }
+}
+
+/// Observer: resets everything to a blank show state (Cmd+N).
+pub fn on_new_show(
+    _trigger: On<NewShowEvent>,
+    mut patch: ResMut<stagelx_patch::PatchRes>,
+    mut stack: ResMut<CueStack>,
+    mut venue: ResMut<VenueLoadState>,
+    mut show_name: ResMut<crate::ShowName>,
+    mut programmer: ResMut<crate::Programmer>,
+    mut commands: Commands,
+) {
+    // Despawn all fixture entities before clearing the patch.
+    let ids: Vec<_> = patch.0.fixtures().map(|f| f.id).collect();
+    for id in ids {
+        commands.trigger(DespawnFixtureEvent(id));
+    }
+    patch.0 = stagelx_core::patch::Patch::default();
+    *stack = CueStack::default();
+    show_name.0 = "Untitled Show".into();
+    venue.import_path.clear();
+    venue.import_error = None;
+    programmer.fixture_values.clear();
 }
 
 /// Startup system: auto-load `show.slx` (or migrate legacy `show.json`) on app start.

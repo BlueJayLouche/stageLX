@@ -201,6 +201,24 @@ pub fn osc_receive(
 
     let mut count = 0u64;
     while let Ok(msg) = state.rx.try_recv() {
+        let args_summary: String = msg
+            .args
+            .iter()
+            .map(|a| match a {
+                OscType::Float(f)  => format!("{:.3}", f),
+                OscType::Double(d) => format!("{:.3}", d),
+                OscType::Int(i)    => i.to_string(),
+                _                  => format!("{:?}", a),
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        let log_line = format!("{}  [{}]", msg.addr, args_summary);
+        info!("OSC RX: {}", log_line);
+        stats.last_messages.push(log_line);
+        if stats.last_messages.len() > 8 {
+            stats.last_messages.remove(0);
+        }
+
         let parts: Vec<&str> = msg.addr.trim_start_matches('/').split('/').collect();
 
         // ── Cue triggers ──────────────────────────────────────────────────────

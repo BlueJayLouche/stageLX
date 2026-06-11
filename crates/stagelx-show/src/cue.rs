@@ -4,12 +4,12 @@
 //! record-from-programmer, GO/BACK navigation, JSON persistence.
 //! Phase 7.1: fade engine with per-fixture interpolation.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use stagelx_core::types::FixtureId;
-use crate::Programmer;
+use crate::{Programmer, ProgrammerValues};
 use stagelx_patch::PatchRes;
 
 // ─── Value snapshot ───────────────────────────────────────────────────────────
@@ -25,11 +25,18 @@ pub struct CueValues {
     pub color: [f32; 3],
     pub gobo_index: u8,
     pub gobo_spin: f32,
+    /// Raw DMX (0–255) for the ColorMacro1 preset channel on FX fixtures.
+    /// `#[serde(default)]` keeps older show files (without this field) loadable.
+    #[serde(default)]
+    pub color_macro: u8,
+    /// Normalised motor rotation speed/index (0.0–1.0 → DMX 0–255) on FX fixtures.
+    #[serde(default)]
+    pub rotation: f32,
 }
 
 impl CueValues {
-    /// Capture current programmer values (programmer is global, so all fixtures
-    /// get the same values in this Phase-6 snapshot).
+    /// Capture from the programmer's global display fields (used as a fallback
+    /// for fixtures that were never individually selected).
     pub fn from_programmer(prog: &Programmer) -> Self {
         Self {
             dimmer: prog.dimmer,
@@ -40,6 +47,40 @@ impl CueValues {
             color: prog.color,
             gobo_index: prog.gobo_index as u8,
             gobo_spin: prog.gobo_spin,
+            color_macro: prog.color_macro,
+            rotation: prog.rotation,
+        }
+    }
+
+    /// Capture from a per-fixture `ProgrammerValues` entry.
+    pub fn from_programmer_values(pv: &ProgrammerValues) -> Self {
+        Self {
+            dimmer: pv.dimmer,
+            pan: pv.pan,
+            tilt: pv.tilt,
+            zoom: pv.zoom,
+            strobe: pv.strobe,
+            color: pv.color,
+            gobo_index: pv.gobo_index as u8,
+            gobo_spin: pv.gobo_spin,
+            color_macro: pv.color_macro,
+            rotation: pv.rotation,
+        }
+    }
+
+    /// Convert to a `ProgrammerValues` snapshot.
+    pub fn to_programmer_values(&self) -> ProgrammerValues {
+        ProgrammerValues {
+            dimmer: self.dimmer,
+            pan: self.pan,
+            tilt: self.tilt,
+            zoom: self.zoom,
+            strobe: self.strobe,
+            color: self.color,
+            gobo_index: self.gobo_index as usize,
+            gobo_spin: self.gobo_spin,
+            color_macro: self.color_macro,
+            rotation: self.rotation,
         }
     }
 
@@ -60,6 +101,9 @@ impl CueValues {
             ],
             gobo_index: if t >= 1.0 { other.gobo_index } else { self.gobo_index },
             gobo_spin: self.gobo_spin + (other.gobo_spin - self.gobo_spin) * t,
+            // Macro presets are discrete selections — snap at the end like gobo.
+            color_macro: if t >= 1.0 { other.color_macro } else { self.color_macro },
+            rotation: self.rotation + (other.rotation - self.rotation) * t,
         }
     }
 }
@@ -112,10 +156,15 @@ impl CueStack {
         prog: &Programmer,
         patch: &PatchRes,
     ) -> usize {
-        let values = CueValues::from_programmer(prog);
         let mut snapshot = HashMap::new();
         for inst in patch.0.fixtures() {
-            snapshot.insert(inst.id, values.clone());
+            // Use the per-fixture stored values. A fixture that was never
+            // programmed records clean defaults — NOT the shared display fields,
+            // which would leak the last-edited fixture's values into it.
+            let values = prog.fixture_values.get(&inst.id)
+                .map(CueValues::from_programmer_values)
+                .unwrap_or_else(|| CueValues::from_programmer_values(&ProgrammerValues::default()));
+            snapshot.insert(inst.id, values);
         }
 
         let num = self.cues.len() + 1;
@@ -272,10 +321,73 @@ pub fn on_record_cue(
     commands.trigger(crate::show_file::SaveShowEvent);
 }
 
+/// Push every fixture's values from a cue snapshot into the programmer's
+/// per-fixture store and update the display fields from the lowest-ID fixture.
+/// This ensures programmer_to_dmx (priority 200) outputs the cue, not stale values.
+fn apply_cue_to_programmer(cue: &Cue, programmer: &mut Programmer) {
+    for (id, vals) in &cue.snapshot {
+        programmer.fixture_values.insert(*id, vals.to_programmer_values());
+    }
+    if let Some((_, vals)) = cue.snapshot.iter().min_by_key(|(id, _)| *id) {
+        programmer.load_values(&vals.to_programmer_values());
+    }
+    // Signal programmer_update to reset the baseline instead of writing back.
+    // Without this, programmer_update sees display ≠ old baseline and overwrites
+    // all selected fixtures with the just-loaded values, destroying per-fixture data.
+    programmer.cue_load_pending = true;
+}
+
+/// Build a fade `from` snapshot out of the programmer's current per-fixture
+/// values, for exactly the fixtures present in `target`. This makes a GO/BACK a
+/// true crossfade from whatever is live right now (including manual edits).
+fn snapshot_from_programmer(
+    programmer: &Programmer,
+    target: &HashMap<FixtureId, CueValues>,
+) -> HashMap<FixtureId, CueValues> {
+    target
+        .keys()
+        .map(|id| (*id, CueValues::from_programmer_values(&programmer.values_for(*id))))
+        .collect()
+}
+
+/// Drive an in-progress cue fade. Each frame, interpolate every fixture between
+/// the fade's `from` and `to` snapshots and write the result straight into the
+/// programmer's per-fixture store (priority 200), so both the DMX output and the
+/// 3-D viewport animate together. Sets `cue_load_pending` so `programmer_update`
+/// yields instead of overwriting the fade with the editor display.
+pub fn advance_cue_fade(
+    mut playhead: ResMut<CuePlayhead>,
+    mut programmer: ResMut<Programmer>,
+) {
+    let done = {
+        let PlayheadState::Fading { start, duration_ms, from, to } = &playhead.state else {
+            return;
+        };
+        let t = (start.elapsed().as_secs_f32() * 1000.0 / (*duration_ms).max(1) as f32)
+            .clamp(0.0, 1.0);
+        let ids: HashSet<FixtureId> = from.keys().chain(to.keys()).copied().collect();
+        for id in ids {
+            let from_v = from.get(&id).cloned().unwrap_or_default();
+            let to_v = to.get(&id).cloned().unwrap_or_default();
+            programmer
+                .fixture_values
+                .insert(id, from_v.lerp(&to_v, t).to_programmer_values());
+        }
+        t >= 1.0
+    };
+
+    // Keep the editor from fighting the fade; updated every fade frame.
+    programmer.cue_load_pending = true;
+    if done {
+        playhead.state = PlayheadState::Idle;
+    }
+}
+
 pub fn on_go_cue(
     _trigger: On<GoCueEvent>,
     stack: Res<CueStack>,
     mut playhead: ResMut<CuePlayhead>,
+    mut programmer: ResMut<Programmer>,
 ) {
     let next = match playhead.current_cue_index {
         Some(i) => (i + 1).min(stack.cues.len().saturating_sub(1)),
@@ -285,32 +397,35 @@ pub fn on_go_cue(
         return;
     }
 
-    // If already fading, snap to target first.
+    // If already fading, snap to where we are; the new move starts from there.
     playhead.snap_fade();
 
-    let current_idx = playhead.current_cue_index;
     let next_cue = &stack.cues[next];
+    playhead.current_cue_index = Some(next);
 
     if next_cue.fade_in_ms > 0 {
-        let from = current_idx
-            .and_then(|i| stack.cues.get(i))
-            .map(|c| c.snapshot.clone())
-            .unwrap_or_default();
+        // Crossfade from the current live state into the next cue. advance_cue_fade
+        // writes the interpolation into the programmer (priority 200), so the DMX
+        // output and the 3-D view both animate.
+        let from = snapshot_from_programmer(&programmer, &next_cue.snapshot);
         playhead.state = PlayheadState::Fading {
             start: Instant::now(),
             duration_ms: next_cue.fade_in_ms,
             from,
             to: next_cue.snapshot.clone(),
         };
+        programmer.cue_load_pending = true;
+    } else {
+        // Instant cut: push values into the programmer immediately.
+        apply_cue_to_programmer(next_cue, &mut programmer);
     }
-
-    playhead.current_cue_index = Some(next);
 }
 
 pub fn on_back_cue(
     _trigger: On<BackCueEvent>,
     stack: Res<CueStack>,
     mut playhead: ResMut<CuePlayhead>,
+    mut programmer: ResMut<Programmer>,
 ) {
     let prev = match playhead.current_cue_index {
         Some(0) => None,
@@ -318,27 +433,34 @@ pub fn on_back_cue(
         None => None,
     };
 
-    // If already fading, snap to target first.
+    // If already fading, snap to where we are; the new move starts from there.
     playhead.snap_fade();
 
-    if let Some(current) = playhead.current_cue_index {
-        let current_cue = &stack.cues[current];
-        if current_cue.fade_out_ms > 0 && prev.is_some() {
-            let from = current_cue.snapshot.clone();
-            let to = prev
-                .and_then(|i| stack.cues.get(i))
-                .map(|c| c.snapshot.clone())
-                .unwrap_or_default();
-            playhead.state = PlayheadState::Fading {
-                start: Instant::now(),
-                duration_ms: current_cue.fade_out_ms,
-                from,
-                to,
-            };
-        }
-    }
+    // The fade-out time comes from the cue we're leaving.
+    let fade_out_ms = playhead
+        .current_cue_index
+        .and_then(|i| stack.cues.get(i))
+        .map(|c| c.fade_out_ms)
+        .unwrap_or(0);
 
     playhead.current_cue_index = prev;
+
+    // Backed out before the first cue — nothing to fade to.
+    let Some(idx) = prev else { return };
+    let Some(target) = stack.cues.get(idx) else { return };
+
+    if fade_out_ms > 0 {
+        let from = snapshot_from_programmer(&programmer, &target.snapshot);
+        playhead.state = PlayheadState::Fading {
+            start: Instant::now(),
+            duration_ms: fade_out_ms,
+            from,
+            to: target.snapshot.clone(),
+        };
+        programmer.cue_load_pending = true;
+    } else {
+        apply_cue_to_programmer(target, &mut programmer);
+    }
 }
 
 pub fn on_delete_cue(
@@ -383,6 +505,7 @@ pub fn on_load_cue_into_programmer(
     programmer.color = values.color;
     programmer.gobo_index = values.gobo_index as usize;
     programmer.gobo_spin = values.gobo_spin;
+    programmer.cue_load_pending = true;
 }
 
 pub fn on_update_cue(
@@ -396,9 +519,11 @@ pub fn on_update_cue(
     let Some(idx) = playhead.current_cue_index else { return };
     let Some(cue) = stack.cues.get_mut(idx) else { return };
 
-    let values = CueValues::from_programmer(&programmer);
     for inst in patch.0.fixtures() {
-        cue.snapshot.insert(inst.id, values.clone());
+        let values = programmer.fixture_values.get(&inst.id)
+            .map(CueValues::from_programmer_values)
+            .unwrap_or_else(|| CueValues::from_programmer_values(&ProgrammerValues::default()));
+        cue.snapshot.insert(inst.id, values);
     }
 
     commands.trigger(crate::show_file::SaveShowEvent);
@@ -421,6 +546,8 @@ mod tests {
             color: [0.0, 0.0, 0.0],
             gobo_index: 0,
             gobo_spin: 0.0,
+            color_macro: 0,
+            rotation: 0.0,
         };
         let b = CueValues {
             dimmer: 1.0,
@@ -431,6 +558,8 @@ mod tests {
             color: [1.0, 1.0, 1.0],
             gobo_index: 3,
             gobo_spin: 1.0,
+            color_macro: 0,
+            rotation: 0.0,
         };
         let mid = a.lerp(&b, 0.5);
         assert!((mid.dimmer - 0.5).abs() < 0.001);
@@ -459,6 +588,8 @@ mod tests {
             color: [0.5, 0.5, 0.5],
             gobo_index: 0,
             gobo_spin: 0.0,
+            color_macro: 0,
+            rotation: 0.0,
         };
         let b = CueValues {
             dimmer: 1.0,
@@ -469,6 +600,8 @@ mod tests {
             color: [1.0, 1.0, 1.0],
             gobo_index: 3,
             gobo_spin: 1.0,
+            color_macro: 0,
+            rotation: 0.0,
         };
         // t > 1.0 should be clamped
         let over = a.lerp(&b, 2.0);
@@ -496,6 +629,8 @@ mod tests {
             color: [0.0, 0.0, 0.0],
             gobo_index: 0,
             gobo_spin: 0.0,
+            color_macro: 0,
+            rotation: 0.0,
         };
         let b = CueValues {
             dimmer: 1.0,
@@ -506,6 +641,8 @@ mod tests {
             color: [1.0, 1.0, 1.0],
             gobo_index: 3,
             gobo_spin: 1.0,
+            color_macro: 0,
+            rotation: 0.0,
         };
         // At t = 0.999, strobe and gobo should still be 'from'
         let almost = a.lerp(&b, 0.999);

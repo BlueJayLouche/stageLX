@@ -4,10 +4,11 @@
 //! can borrow its config independently, eliminating scheduler contention.
 
 use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
 
 // ─── Art-Net ──────────────────────────────────────────────────────────────────
 
-#[derive(Resource)]
+#[derive(Resource, Clone, Serialize, Deserialize)]
 pub struct ArtNetConfig {
     /// Local IP to bind (empty = 0.0.0.0).
     pub ip: String,
@@ -41,7 +42,7 @@ impl Default for ArtNetConfig {
 
 // ─── sACN (E1.31) ─────────────────────────────────────────────────────────────
 
-#[derive(Resource)]
+#[derive(Resource, Clone, Serialize, Deserialize)]
 pub struct SacnConfig {
     /// Enable sACN output.
     pub tx_enabled: bool,
@@ -72,7 +73,7 @@ impl Default for SacnConfig {
 
 // ─── USB DMX (Enttec USB Pro) ─────────────────────────────────────────────────
 
-#[derive(Resource)]
+#[derive(Resource, Clone, Serialize, Deserialize)]
 pub struct UsbConfig {
     /// Enable USB DMX output.
     pub tx_enabled: bool,
@@ -94,7 +95,7 @@ impl Default for UsbConfig {
 
 // ─── MIDI input ───────────────────────────────────────────────────────────────
 
-#[derive(Resource)]
+#[derive(Resource, Clone, Serialize, Deserialize)]
 pub struct MidiConfig {
     /// Enable MIDI input.
     pub enabled: bool,
@@ -139,7 +140,7 @@ impl Default for MidiConfig {
 
 // ─── OSC input ────────────────────────────────────────────────────────────────
 
-#[derive(Resource)]
+#[derive(Resource, Clone, Serialize, Deserialize)]
 pub struct OscConfig {
     /// Enable OSC input listener.
     pub enabled: bool,

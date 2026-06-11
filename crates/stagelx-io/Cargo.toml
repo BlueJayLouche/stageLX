@@ -15,3 +15,6 @@ serialport        = { workspace = true }
 midir             = { workspace = true }
 rosc              = { workspace = true }
 socket2           = { workspace = true }
+serde             = { workspace = true }
+serde_json        = "1"
+dirs              = { workspace = true }

@@ -5,7 +5,6 @@
 //! Phase 7.1: supports cross-fade interpolation via CuePlayhead fade state.
 
 use bevy::prelude::*;
-use std::collections::HashSet;
 use stagelx_core::types::FixtureId;
 use stagelx_patch::PatchRes;
 use stagelx_show::{CuePlayhead, CueStack, CueValues, PlayheadState};
@@ -97,37 +96,25 @@ fn write_fixture_cue_values(
 pub fn cue_to_dmx(
     mut engine: ResMut<DmxEngineRes>,
     stack: Res<CueStack>,
-    mut playhead: ResMut<CuePlayhead>,
+    playhead: Res<CuePlayhead>,
     patch: Res<PatchRes>,
 ) {
     const SOURCE: &str = "cue_playback";
     const PRIORITY: u8 = 150;
 
-    // ── Active fade: interpolate between from / to snapshots ────────────────
-    if let PlayheadState::Fading {
-        start,
-        duration_ms,
-        ref from,
-        ref to,
-    } = playhead.state
-    {
-        let elapsed_ms = start.elapsed().as_secs_f32() * 1000.0;
-        let duration = duration_ms as f32;
-        let t = (elapsed_ms / duration).clamp(0.0, 1.0);
+    // Rebuild from scratch each tick so fixtures no longer in the active cue
+    // release their channels instead of latching.
+    engine
+        .0
+        .get_or_add_source(SOURCE, PRIORITY, MergeStrategy::Ltp)
+        .universes
+        .clear_all();
 
-        let ids: HashSet<FixtureId> = from.keys().chain(to.keys()).copied().collect();
-
-        for fixture_id in ids {
-            let from_values = from.get(&fixture_id).cloned().unwrap_or_default();
-            let to_values = to.get(&fixture_id).cloned().unwrap_or_default();
-            let values = from_values.lerp(&to_values, t);
-            write_fixture_cue_values(&mut engine, SOURCE, PRIORITY, fixture_id, &values, &patch);
-        }
-
-        if t >= 1.0 {
-            playhead.state = PlayheadState::Idle;
-        }
-
+    // During a fade the programmer source (priority 200) carries the interpolated
+    // values — advance_cue_fade writes them into the programmer each frame so both
+    // DMX and the 3-D view animate. This lower-priority source would be shadowed
+    // anyway, so it stands down to keep a single owner of the fade.
+    if matches!(playhead.state, PlayheadState::Fading { .. }) {
         return;
     }
 
