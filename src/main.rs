@@ -9,9 +9,9 @@ use stagelx_dmx::{cue_to_dmx, on_record_stage_cue};
 use stagelx_io::{IoPlugin, dmx_engine_tick};
 use stagelx_render::StageLxRenderPlugin;
 use stagelx_show::{
-    auto_load_show_on_startup,
+    advance_cue_fade, auto_load_show_on_startup,
     on_back_cue, on_delete_cue, on_go_cue, on_load_cue_into_programmer,
-    on_load_show, on_record_cue, on_save_show, on_update_cue,
+    on_load_show, on_new_show, on_record_cue, on_save_show, on_update_cue,
 };
 use stagelx_ui::StageLxUiPlugin;
 
@@ -71,9 +71,13 @@ fn main() {
         .add_observer(on_update_cue)
         .add_observer(on_save_show)
         .add_observer(on_load_show)
+        .add_observer(on_new_show)
         .add_observer(on_go_cue)
         .add_observer(on_back_cue)
         .add_observer(on_delete_cue)
+        // Cue fades are driven through the programmer (priority 200) so DMX and
+        // the 3-D view animate together.
+        .add_systems(Update, advance_cue_fade)
         // Cue playback (priority 150) writes before engine merge.
         .add_systems(FixedUpdate, cue_to_dmx.before(dmx_engine_tick))
         .run();

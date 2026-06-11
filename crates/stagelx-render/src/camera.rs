@@ -3,6 +3,8 @@ use bevy::{
     prelude::*,
     window::{CursorGrabMode, CursorOptions, PrimaryWindow},
 };
+use bevy_egui::input::EguiWantsInput;
+use stagelx_show::EguiViewportRect;
 
 /// Orbit / pan / zoom controller for the FOH perspective camera.
 #[derive(Component, Debug, Clone, Copy)]
@@ -64,13 +66,26 @@ pub fn foh_camera_input(
     mouse_motion: Res<AccumulatedMouseMotion>,
     mut scroll: MessageReader<MouseWheel>,
     mut cursor_opts: Query<&mut CursorOptions, With<PrimaryWindow>>,
+    window_q: Query<&Window, With<PrimaryWindow>>,
     mut cameras: Query<&mut FohCameraController>,
+    egui_wants: Res<EguiWantsInput>,
+    viewport_rect: Res<EguiViewportRect>,
 ) {
     let Ok(mut ctrl) = cameras.single_mut() else { return };
     let motion_delta = mouse_motion.delta;
 
+    // Allow camera input when the cursor is inside the 3D viewport area and
+    // egui is not actively using the pointer (e.g. dragging a slider).
+    let cursor_in_viewport = window_q.single()
+        .ok()
+        .and_then(|w| w.cursor_position())
+        .map(|pos| viewport_rect.contains(pos.x, pos.y))
+        .unwrap_or(false);
+    let egui_active = egui_wants.is_using_pointer();
+    let allow = cursor_in_viewport && !egui_active;
+
     // ── Orbit: right mouse drag ──
-    if mouse_buttons.pressed(MouseButton::Right) && motion_delta != Vec2::ZERO {
+    if allow && mouse_buttons.pressed(MouseButton::Right) && motion_delta != Vec2::ZERO {
         ctrl.yaw -= motion_delta.x * ctrl.orbit_speed;
         ctrl.pitch += motion_delta.y * ctrl.orbit_speed;
         ctrl.pitch = ctrl.pitch.clamp(ctrl.min_pitch, ctrl.max_pitch);
@@ -82,7 +97,7 @@ pub fn foh_camera_input(
         }
     }
     // ── Pan: middle mouse drag ──
-    else if mouse_buttons.pressed(MouseButton::Middle) && motion_delta != Vec2::ZERO {
+    else if allow && mouse_buttons.pressed(MouseButton::Middle) && motion_delta != Vec2::ZERO {
         let dir = ctrl.direction();
         let right = dir.cross(Vec3::Y).normalize();
         let up = right.cross(dir).normalize();
@@ -100,13 +115,15 @@ pub fn foh_camera_input(
     }
 
     // ── Zoom: scroll wheel ──
-    for ev in scroll.read() {
-        let delta = match ev.unit {
-            MouseScrollUnit::Line => ev.y,
-            MouseScrollUnit::Pixel => ev.y * 0.01,
-        };
-        ctrl.distance -= delta * ctrl.zoom_speed * ctrl.distance;
-        ctrl.distance = ctrl.distance.clamp(ctrl.min_distance, ctrl.max_distance);
+    if allow {
+        for ev in scroll.read() {
+            let delta = match ev.unit {
+                MouseScrollUnit::Line => ev.y,
+                MouseScrollUnit::Pixel => ev.y * 0.01,
+            };
+            ctrl.distance -= delta * ctrl.zoom_speed * ctrl.distance;
+            ctrl.distance = ctrl.distance.clamp(ctrl.min_distance, ctrl.max_distance);
+        }
     }
 }
 

@@ -13,10 +13,10 @@ use std::collections::HashSet;
 
 pub use stagelx_patch::{DespawnFixtureEvent, PatchEditState, PatchRes, SpawnFixtureEvent};
 pub use stagelx_show::{
-    BackCueEvent, CuePlayhead, CueStack, DeleteCueEvent, FixtureLibraryRes,
+    BackCueEvent, CuePlayhead, CueStack, DeleteCueEvent, EguiViewportRect, FixtureLibraryRes,
     GoCueEvent, LoadMvrStructureEvent, LoadShowEvent, LoadVenueEvent,
-    MvrStructureObject, PerfDiagnosticsRes, Programmer, RecordCueEvent,
-    SaveShowEvent, VenueLoadState,
+    MvrStructureObject, NewShowEvent, PerfDiagnosticsRes, Programmer, ProgrammerValues,
+    RecordCueEvent, SaveShowEvent, VenueLoadState,
 };
 use stagelx_io::artnet::ArtNetNodeTable;
 use stagelx_io::config::{ArtNetConfig, MidiConfig, OscConfig, SacnConfig, UsbConfig};
@@ -183,6 +183,18 @@ pub enum ActiveProtocol {
 #[derive(Resource, Default)]
 pub struct IoPanelState {
     pub active_protocol: ActiveProtocol,
+    /// Cached result of the last serial-port enumeration (populated by the ▾ button).
+    pub scanned_ports: Vec<String>,
+}
+
+/// Tracks selection and display-value baseline for `programmer_update`.
+#[derive(Resource, Default)]
+struct ProgrammerSyncState {
+    prev_selection: HashSet<FixtureId>,
+    /// Snapshot of display values as they were when the selection last changed.
+    /// Write-back to fixture_values only fires when the current display values
+    /// diverge from this baseline, i.e. the user actually moved a control.
+    baseline: Option<ProgrammerValues>,
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -214,8 +226,10 @@ impl Plugin for StageLxUiPlugin {
             .init_resource::<ShowMeta>()
             .init_resource::<OpenShowDialog>()
             .init_resource::<FontsInstalled>()
+            .init_resource::<ProgrammerSyncState>()
+            .init_resource::<EguiViewportRect>()
             .add_systems(EguiPrimaryContextPass, ui_root_system)
-            .add_systems(Update, sync_midi_target);
+            .add_systems(Update, (sync_midi_target, programmer_update));
     }
 }
 
@@ -233,6 +247,84 @@ fn sync_midi_target(
         midi_target.fixture_ids.clear();
     }
 }
+
+/// Per-fixture programmer sync.
+///
+/// On selection change: loads the first selected fixture's stored values into
+/// the display fields and records them as the **baseline**.
+///
+/// Every frame: only writes display values back to `fixture_values` when they
+/// differ from the baseline — i.e. the user has actively changed a control.
+/// This prevents adding a second fixture to the selection from overwriting its
+/// independent programmer values with whatever the display currently shows.
+fn programmer_update(
+    mut programmer: ResMut<Programmer>,
+    patch_sel: Res<PatchSelection>,
+    mut sync_state: ResMut<ProgrammerSyncState>,
+) {
+    let selection_changed = sync_state.prev_selection != patch_sel.selected_ids;
+    let cue_loaded = programmer.cue_load_pending;
+
+    if selection_changed || cue_loaded {
+        // Clear the cue-load flag before doing anything else.
+        programmer.cue_load_pending = false;
+
+        // Reload the first selected fixture's (possibly just-updated) values
+        // into the display, then record them as the new baseline.
+        // This prevents the stale baseline from making programmer_update think
+        // the user edited something and overwrite other fixtures' values.
+        if let Some(&first_id) = patch_sel.selected_ids.iter().next() {
+            if let Some(vals) = programmer.fixture_values.get(&first_id).cloned() {
+                programmer.load_values(&vals);
+                sync_state.baseline = Some(vals);
+            } else {
+                sync_state.baseline = Some(programmer.active_values());
+            }
+        } else {
+            // No fixtures selected: after a cue load, still reset the baseline
+            // so the next frame doesn't see a spurious "user edit".
+            sync_state.baseline = if cue_loaded {
+                Some(programmer.active_values())
+            } else {
+                None
+            };
+        }
+        sync_state.prev_selection = patch_sel.selected_ids.clone();
+        return;
+    }
+
+    // Only propagate to fixture_values when the user has actually changed
+    // something (display diverged from the baseline set on selection/cue change).
+    let active = programmer.active_values();
+    let user_edited = sync_state.baseline.as_ref()
+        .map(|b| programmer_values_differ(b, &active))
+        .unwrap_or(true);
+
+    if user_edited {
+        for &id in &patch_sel.selected_ids {
+            programmer.fixture_values.insert(id, active.clone());
+        }
+    }
+}
+
+fn programmer_values_differ(a: &ProgrammerValues, b: &ProgrammerValues) -> bool {
+    a.dimmer      != b.dimmer
+        || a.pan         != b.pan
+        || a.tilt        != b.tilt
+        || a.color       != b.color
+        || a.zoom        != b.zoom
+        || a.strobe      != b.strobe
+        || a.gobo_index  != b.gobo_index
+        || a.gobo_spin   != b.gobo_spin
+        || a.color_macro != b.color_macro
+        || a.rotation    != b.rotation
+}
+
+// NOTE: fixtures are intentionally NOT auto-added to the programmer on patch.
+// A fixture enters `fixture_values` only when the user actually programs it
+// (selection + edit, via `programmer_update`). This keeps the programmer source
+// (priority 200) from owning every patched fixture and shadowing external input
+// such as OSC (150) on fixtures the operator never touched.
 
 fn install_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
@@ -272,6 +364,7 @@ fn ui_root_system(
     mut commands: Commands,
     windows: Query<&Window>,
     mut io: IoParams,
+    mut viewport_rect: ResMut<EguiViewportRect>,
 ) {
     let layout = &mut *state.layout;
     let patch_sel = &mut *state.patch_sel;
@@ -299,6 +392,9 @@ fn ui_root_system(
     }
 
     // ── Global keyboard shortcuts ─────────────────────────────────────────────
+    if egui_ctx.input(|i| i.key_pressed(egui::Key::N) && i.modifiers.command) {
+        commands.trigger(NewShowEvent);
+    }
     if egui_ctx.input(|i| i.key_pressed(egui::Key::S) && i.modifiers.command) {
         commands.trigger(SaveShowEvent);
     }
@@ -670,6 +766,7 @@ fn ui_root_system(
                             patch_edit,
                             patch_sel,
                             &mut commands,
+                            prog,
                         );
                     }
                 });
@@ -721,6 +818,11 @@ fn ui_root_system(
         .frame(egui::Frame::new().fill(Color32::TRANSPARENT))
         .show(egui_ctx, |ui| {
             let full_rect = ui.available_rect_before_wrap();
+            viewport_rect.min_x = full_rect.min.x;
+            viewport_rect.min_y = full_rect.min.y;
+            viewport_rect.max_x = full_rect.max.x;
+            viewport_rect.max_y = full_rect.max.y;
+            viewport_rect.valid = true;
             let avail = full_rect.size();
             let split_x = avail.x * 0.75;
             let split_y = avail.y * 0.5;
@@ -824,10 +926,16 @@ fn ui_root_system(
             .resizable(true)
             .frame(float_frame)
             .show(egui_ctx, |ui| {
-                programmer::programmer_panel_docked(ui, prog, patch_sel, patch);
-                if ui.button("Re-dock").clicked() {
+                // Re-dock button first so it's always visible above the scroll area.
+                if ui.add(
+                    egui::Button::new(RichText::new("⬅ Re-dock").size(10.0).color(FG_SECONDARY))
+                        .fill(Color32::TRANSPARENT)
+                        .stroke(Stroke::new(1.0, BORDER_SOFT))
+                        .min_size(Vec2::new(0.0, 20.0)),
+                ).clicked() {
                     layout.detached.remove(&PanelKind::Programmer);
                 }
+                programmer::programmer_panel_docked(ui, prog, patch_sel, patch);
             });
     }
     if !run_mode && layout.detached.contains(&PanelKind::Patch) {
@@ -839,7 +947,7 @@ fn ui_root_system(
             .resizable(true)
             .frame(float_frame)
             .show(egui_ctx, |ui| {
-                patch::patch_panel_docked(ui, patch, library, patch_edit, patch_sel, &mut commands);
+                patch::patch_panel_docked(ui, patch, library, patch_edit, patch_sel, &mut commands, prog);
                 if ui.button("Re-dock").clicked() {
                     layout.detached.remove(&PanelKind::Patch);
                 }

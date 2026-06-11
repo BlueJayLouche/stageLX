@@ -276,13 +276,14 @@ pub fn articulate_fixtures(
     mut yoke_q: Query<(&YokeJoint, &mut Transform), Without<HeadJoint>>,
     mut head_q: Query<(&HeadJoint, &mut Transform), Without<YokeJoint>>,
 ) {
-    let pan_deg  = (programmer.pan  - 0.5) * programmer.pan_range;
-    let tilt_deg = (programmer.tilt - 0.5) * programmer.tilt_range;
-
-    for (_yoke, mut transform) in &mut yoke_q {
+    for (yoke, mut transform) in &mut yoke_q {
+        let pan = programmer.values_for(yoke.id).pan;
+        let pan_deg = (pan - 0.5) * yoke.pan_range;
         transform.rotation = Quat::from_rotation_y(pan_deg.to_radians());
     }
-    for (_head, mut transform) in &mut head_q {
+    for (head, mut transform) in &mut head_q {
+        let tilt = programmer.values_for(head.id).tilt;
+        let tilt_deg = (tilt - 0.5) * head.tilt_range;
         transform.rotation = Quat::from_rotation_x(tilt_deg.to_radians());
     }
 }
@@ -293,59 +294,57 @@ pub fn articulate_beams(
     programmer: Res<Programmer>,
     time: Res<Time>,
     mut beam_q: Query<
-        (&MeshMaterial3d<BeamMaterial>, &mut Transform, Ref<GlobalTransform>),
-        (With<BeamCone>, Without<YokeJoint>, Without<HeadJoint>, Without<BeamSprite>, Without<BeamSpriteTop>),
+        (&BeamCone, &MeshMaterial3d<BeamMaterial>, &mut Transform, Ref<GlobalTransform>),
+        (Without<YokeJoint>, Without<HeadJoint>, Without<BeamSprite>, Without<BeamSpriteTop>),
     >,
-    mut sprite_q: Query<(&MeshMaterial3d<BeamSpriteMaterial>, &mut Transform, &GlobalTransform), (With<BeamSprite>, Without<BeamCone>, Without<BeamSpriteTop>)>,
-    mut top_sprite_q: Query<(&MeshMaterial3d<BeamSpriteMaterial>, &mut Transform, &GlobalTransform), (With<BeamSpriteTop>, Without<BeamCone>, Without<BeamSprite>)>,
-    mut light_q: Query<&mut PointLight, With<BeamSource>>,
+    mut sprite_q: Query<(&BeamSprite, &MeshMaterial3d<BeamSpriteMaterial>, &mut Transform, &GlobalTransform), (Without<BeamCone>, Without<BeamSpriteTop>)>,
+    mut top_sprite_q: Query<(&BeamSpriteTop, &MeshMaterial3d<BeamSpriteMaterial>, &mut Transform, &GlobalTransform), (Without<BeamCone>, Without<BeamSprite>)>,
+    mut light_q: Query<(&BeamSource, &mut PointLight)>,
     mut beam_materials: ResMut<Assets<BeamMaterial>>,
     mut sprite_materials: ResMut<Assets<BeamSpriteMaterial>>,
     gobo_library: Res<GoboLibrary>,
-    mut last_programmer: Local<Programmer>,
     mut perf: ResMut<PerfDiagnosticsRes>,
 ) {
     let t0 = std::time::Instant::now();
 
-    // Determine whether programmer state has changed since last frame.
-    let programmer_changed = *last_programmer != *programmer;
+    const INTENSITY: f32 = 0.55;
+    const BASE_HALF_DEG: f32 = 5.0;
+    let elapsed = time.elapsed_secs();
 
-    // Strobe and gobo spin are time-driven and require per-frame updates even
-    // when the programmer resource itself hasn't changed.
-    let time_driven = programmer.strobe > 0.01 || programmer.gobo_spin > 0.0;
+    // Whether the programmer changed this frame (per-fixture writes mark it),
+    // plus a time-driven flag if *any* fixture is strobing or spinning a gobo.
+    let programmer_changed = programmer.is_changed();
+    let time_driven = programmer
+        .fixture_values
+        .values()
+        .any(|v| v.strobe > 0.01 || v.gobo_spin > 0.0);
     let needs_full_update = programmer_changed || time_driven;
 
-    // Pre-compute derived values once.
-    let shutter_open = if programmer.strobe < 0.01 {
-        true
-    } else {
-        let hz = programmer.strobe * 25.0;
-        (time.elapsed_secs() * hz) % 1.0 < 0.5
+    // Derive a single fixture's beam appearance from its own programmer values.
+    let derive = |id: FixtureId| {
+        let v = programmer.values_for(id);
+        let shutter_open = if v.strobe < 0.01 {
+            true
+        } else {
+            let hz = v.strobe * 25.0;
+            (elapsed * hz) % 1.0 < 0.5
+        };
+        let d = v.dimmer * INTENSITY * if shutter_open { 1.0 } else { 0.0 };
+        let color = LinearRgba::new(v.color[0] * d, v.color[1] * d, v.color[2] * d, 1.0);
+        let target_half_deg = 2.5 + v.zoom * 20.0;
+        let scale_xz = target_half_deg.to_radians().tan() / BASE_HALF_DEG.to_radians().tan();
+        let gobo_rotation = elapsed * v.gobo_spin * std::f32::consts::TAU;
+        let gobo_handle = gobo_library
+            .handles
+            .get(v.gobo_index)
+            .cloned()
+            .unwrap_or_else(|| gobo_library.handles[0].clone());
+        let light_intensity = v.dimmer * 500_000.0 * if shutter_open { 1.0 } else { 0.0 };
+        let light_color = Color::srgb(v.color[0], v.color[1], v.color[2]);
+        (color, scale_xz, gobo_rotation, gobo_handle, light_intensity, light_color)
     };
 
-    const INTENSITY: f32 = 0.55;
-    let d = programmer.dimmer * INTENSITY * if shutter_open { 1.0 } else { 0.0 };
-    let color = LinearRgba::new(
-        programmer.color[0] * d,
-        programmer.color[1] * d,
-        programmer.color[2] * d,
-        1.0,
-    );
-
-    const BASE_HALF_DEG: f32 = 5.0;
-    let target_half_deg = 2.5 + programmer.zoom * 20.0;
-    let scale_xz = target_half_deg.to_radians().tan() / BASE_HALF_DEG.to_radians().tan();
-
-    let gobo_rotation = time.elapsed_secs() * programmer.gobo_spin * std::f32::consts::TAU;
-    let gobo_params   = Vec4::new(gobo_rotation, 0.0, 0.0, 0.0);
-
-    let gobo_handle = gobo_library
-        .handles
-        .get(programmer.gobo_index)
-        .cloned()
-        .unwrap_or_else(|| gobo_library.handles[0].clone());
-
-    for (handle, mut transform, global_tf) in &mut beam_q {
+    for (cone, handle, mut transform, global_tf) in &mut beam_q {
         let transform_changed = global_tf.is_changed();
         if !needs_full_update && !transform_changed {
             continue;
@@ -353,9 +352,10 @@ pub fn articulate_beams(
 
         if let Some(mat) = beam_materials.get_mut(handle.id()) {
             if needs_full_update {
+                let (color, scale_xz, gobo_rotation, gobo_handle, _, _) = derive(cone.id);
                 mat.color         = color;
-                mat.gobo_params   = gobo_params;
-                mat.gobo          = gobo_handle.clone();
+                mat.gobo_params   = Vec4::new(gobo_rotation, 0.0, 0.0, 0.0);
+                mat.gobo          = gobo_handle;
                 // Use the *base* half-angle here: the shader operates in scaled cone-local
                 // space (world_to_cone includes the XZ zoom scale), so the cone geometry
                 // in that space is always the original base cone.
@@ -375,33 +375,30 @@ pub fn articulate_beams(
 
     // Sprite materials and point lights only need updating when programmer changes.
     if needs_full_update {
-        for (sprite_handle, mut sprite_transform, _global_tf) in &mut sprite_q {
+        for (sprite, sprite_handle, mut sprite_transform, _global_tf) in &mut sprite_q {
+            let (color, scale_xz, gobo_rotation, gobo_handle, _, _) = derive(sprite.id);
             if let Some(mat) = sprite_materials.get_mut(sprite_handle.id()) {
                 mat.color = color;
                 mat.sprite_params = Vec4::new(gobo_rotation, 2.0, 0.0, 0.0);
-                mat.gobo = gobo_handle.clone();
+                mat.gobo = gobo_handle;
             }
             sprite_transform.scale = Vec3::new(scale_xz, scale_xz, scale_xz);
         }
-        for (top_sprite_handle, mut top_sprite_transform, _global_tf) in &mut top_sprite_q {
+        for (top, top_sprite_handle, mut top_sprite_transform, _global_tf) in &mut top_sprite_q {
+            let (color, scale_xz, gobo_rotation, gobo_handle, _, _) = derive(top.id);
             if let Some(mat) = sprite_materials.get_mut(top_sprite_handle.id()) {
                 mat.color = color;
                 mat.sprite_params = Vec4::new(gobo_rotation, 2.0, 0.0, 0.0);
-                mat.gobo = gobo_handle.clone();
+                mat.gobo = gobo_handle;
             }
             top_sprite_transform.scale = Vec3::new(scale_xz, scale_xz, scale_xz);
         }
 
-        let light_intensity = programmer.dimmer * 500_000.0 * if shutter_open { 1.0 } else { 0.0 };
-        let light_color = Color::srgb(programmer.color[0], programmer.color[1], programmer.color[2]);
-        for mut light in &mut light_q {
+        for (source, mut light) in &mut light_q {
+            let (_, _, _, _, light_intensity, light_color) = derive(source.id);
             light.intensity = light_intensity;
             light.color     = light_color;
         }
-    }
-
-    if programmer_changed {
-        *last_programmer = programmer.clone();
     }
 
     perf.beam_articulate_ms = t0.elapsed().as_secs_f32() * 1000.0;

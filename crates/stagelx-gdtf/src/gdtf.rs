@@ -477,6 +477,15 @@ impl GdtfFixtureType {
         if let Some(ch) = mode.channel_for("ColorWheel") {
             map.color_wheel = Some(ch.offset.saturating_sub(1));
         }
+        if let Some(ch) = mode.channel_for("ColorMacro1") {
+            map.color_macro = Some(ch.offset.saturating_sub(1));
+        }
+        if let Some(ch) = mode.channel_for("Rotation") {
+            map.rotation = Some(ch.offset.saturating_sub(1));
+        }
+        if let Some(ch) = mode.channel_for("Strobe") {
+            map.strobe = Some(ch.offset.saturating_sub(1));
+        }
         map
     }
 }

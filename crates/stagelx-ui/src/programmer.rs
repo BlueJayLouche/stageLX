@@ -13,7 +13,7 @@ use stagelx_show::Programmer;
 pub fn programmer_panel_docked(
     ui: &mut Ui,
     prog: &mut Programmer,
-    patch_sel: &PatchSelection,
+    patch_sel: &mut PatchSelection,
     patch: &PatchRes,
 ) {
     let available_width = ui.available_width();
@@ -86,9 +86,49 @@ pub fn programmer_panel_docked(
         }
     }
 
+    // ── Clear Selection ───────────────────────────────────────────────────────
+    if !patch_sel.selected_ids.is_empty() {
+        ui.horizontal(|ui| {
+            ui.add_space(6.0);
+            let btn = egui::Button::new(
+                RichText::new("Clear Selection").size(10.0).color(FG_SECONDARY),
+            )
+            .fill(Color32::TRANSPARENT)
+            .stroke(Stroke::new(1.0, BORDER_SOFT))
+            .min_size(Vec2::new(0.0, 20.0));
+            if ui.add(btn).clicked() {
+                for id in &patch_sel.selected_ids {
+                    prog.fixture_values.remove(id);
+                }
+                patch_sel.selected_ids.clear();
+            }
+        });
+    }
+
+    // Derive capability flags from the selected fixtures' channel maps.
+    // When nothing is selected, show every section so the UI doesn't go blank.
+    let (has_pan_tilt, has_gobo, has_color_macro, has_rotation) =
+        if patch_sel.selected_ids.is_empty() {
+            (true, true, true, true)
+        } else {
+            let mut pt = false;
+            let mut gb = false;
+            let mut cm = false;
+            let mut rot = false;
+            for id in &patch_sel.selected_ids {
+                if let Some(f) = patch.0.get(*id) {
+                    if f.channel_map.pan.is_some() || f.channel_map.tilt.is_some() { pt = true; }
+                    if f.channel_map.gobo.is_some() { gb = true; }
+                    if f.channel_map.color_macro.is_some() { cm = true; }
+                    if f.channel_map.rotation.is_some() { rot = true; }
+                }
+            }
+            (pt, gb, cm, rot)
+        };
+
     egui::ScrollArea::vertical()
         .id_salt("programmer_scroll")
-        .auto_shrink([false, false])
+        .auto_shrink([false, true])
         .show(ui, |ui| {
         let available_width = ui.available_width();
     // ── Intensity ─────────────────────────────────────────────────────────────
@@ -113,6 +153,7 @@ pub fn programmer_panel_docked(
     });
 
     // ── Position ──────────────────────────────────────────────────────────────
+    if has_pan_tilt {
     widgets::section_header(ui, "Position", Some("±270° / ±135°"));
     ui.horizontal(|ui| {
         ui.add_space(((available_width - 250.0) * 0.5).max(0.0));
@@ -150,6 +191,7 @@ pub fn programmer_panel_docked(
             .sub_label("BEAM"));
         prog.zoom = (zoom_val - 5.0) / 40.0;
     });
+    } // has_pan_tilt
 
     // ── Colour ────────────────────────────────────────────────────────────────
     let color_presets: &[(&str, [f32; 3])] = &[
@@ -256,6 +298,7 @@ pub fn programmer_panel_docked(
     }
 
     // ── Gobo ──────────────────────────────────────────────────────────────────
+    if has_gobo {
     widgets::section_header(ui, "Gobo", Some("wheel 1 · 4 slots"));
     let gobos = [("Open", 0), ("Dots", 1), ("Breakup", 2), ("Star", 3)];
     ui.horizontal(|ui| {
@@ -351,6 +394,78 @@ pub fn programmer_panel_docked(
         };
         ui.label(RichText::new(spin_text).size(11.0).monospace().color(FG));
     });
+    } // has_gobo
+
+    // ── FX: Color Mode ────────────────────────────────────────────────────────
+    if has_color_macro {
+    // (name, representative display color for the swatch, mid-point DMX value)
+    const COLOR_MODES: &[(&str, [u8; 3], u8)] = &[
+        ("Off",    [20,  20,  20],  2),
+        ("Red",    [220, 30,  30],  13),
+        ("Green",  [30,  200, 50],  28),
+        ("Blue",   [30,  60,  220], 43),
+        ("White",  [220, 220, 220], 58),
+        ("R+G",    [200, 180, 0],   73),
+        ("R+B",    [180, 0,   160], 88),
+        ("R+W",    [220, 140, 140], 103),
+        ("G+B",    [0,   180, 180], 118),
+        ("G+W",    [140, 220, 140], 133),
+        ("B+W",    [140, 140, 220], 148),
+        ("RGB",    [200, 160, 80],  163),
+        ("RGW",    [220, 200, 140], 178),
+        ("GBW",    [100, 200, 200], 193),
+        ("RGBW",   [220, 220, 200], 208),
+        ("Auto4",  [180, 100, 180], 223),
+        ("Auto7",  [160, 160, 160], 243),
+    ];
+
+    widgets::section_header(ui, "Color Mode", Some("Ch 1 — preset"));
+
+    // Display current mode name
+    let current_name = COLOR_MODES.iter()
+        .find(|(_, _, dmx)| *dmx == prog.color_macro
+            || (prog.color_macro > dmx.saturating_sub(7) && prog.color_macro <= *dmx + 7))
+        .map(|(n, _, _)| *n)
+        .unwrap_or("—");
+    ui.horizontal(|ui| {
+        ui.label(hint_secondary(format!("Active: {}  (DMX {})", current_name, prog.color_macro)));
+    });
+
+    let swatch_w = 42.0;
+    let per_row = ((available_width / swatch_w).floor() as usize).max(4).min(COLOR_MODES.len());
+    let mut selected_mode: Option<u8> = None;
+    for chunk_start in (0..COLOR_MODES.len()).step_by(per_row) {
+        ui.horizontal(|ui| {
+            for (name, rgb, dmx) in &COLOR_MODES[chunk_start..(chunk_start + per_row).min(COLOR_MODES.len())] {
+                let is_sel = prog.color_macro == *dmx;
+                let c = Color32::from_rgb(rgb[0], rgb[1], rgb[2]);
+                if widgets::swatch(ui, c, name, is_sel).clicked() {
+                    selected_mode = Some(*dmx);
+                }
+            }
+        });
+    }
+    if let Some(dmx) = selected_mode {
+        prog.color_macro = dmx;
+    }
+    } // has_color_macro
+
+    // ── FX: Motor Rotation ────────────────────────────────────────────────────
+    if has_rotation {
+    widgets::section_header(ui, "Motor", Some("speed · 128–255 DMX"));
+    ui.horizontal(|ui| {
+        ui.add_space(((available_width - 80.0) * 0.5).max(0.0));
+        // Fader: 0 = stopped (DMX 0), 1 = full speed (DMX 255).
+        // 128–255 is the "speed" range on the Mini Kinta (0–127 is index).
+        let mut rot_pct = prog.rotation * 100.0;
+        ui.add(widgets::Fader::new(&mut rot_pct, "Speed")
+            .unit("%")
+            .range(0.0, 100.0)
+            .format(|v| if v < 0.5 { "STOP".into() } else { format!("{:.0}", v) })
+            .accent(WARNING));
+        prog.rotation = rot_pct / 100.0;
+    });
+    } // has_rotation
 
     // ── Quick actions ─────────────────────────────────────────────────────────
     // Tier 1 #6: divider positioned properly
@@ -360,8 +475,9 @@ pub fn programmer_panel_docked(
         Stroke::new(1.0, BORDER_SOFT),
     );
     ui.horizontal(|ui| {
+        let btn_count = if has_pan_tilt { 4 } else { 3 };
         let item_spacing_x = ui.spacing().item_spacing.x;
-        let btn_width = (ui.available_width() - 3.0 * item_spacing_x) / 4.0;
+        let btn_width = (ui.available_width() - (btn_count as f32 - 1.0) * item_spacing_x) / btn_count as f32;
         if ui.add_sized([btn_width, 24.0], egui::Button::new("Black").fill(BG_RAISED).stroke(Stroke::new(1.0, BORDER))).clicked() {
             prog.dimmer = 0.0;
         }
@@ -369,9 +485,11 @@ pub fn programmer_panel_docked(
             prog.dimmer = 1.0;
             prog.color = [1.0, 1.0, 1.0];
         }
-        if ui.add_sized([btn_width, 24.0], egui::Button::new("Home").fill(BG_RAISED).stroke(Stroke::new(1.0, BORDER))).clicked() {
-            prog.pan = 0.5;
-            prog.tilt = 0.5;
+        if has_pan_tilt {
+            if ui.add_sized([btn_width, 24.0], egui::Button::new("Home").fill(BG_RAISED).stroke(Stroke::new(1.0, BORDER))).clicked() {
+                prog.pan = 0.5;
+                prog.tilt = 0.5;
+            }
         }
         if ui.add_sized([btn_width, 24.0], egui::Button::new("Reset").fill(Color32::TRANSPARENT).stroke(Stroke::NONE)).clicked() {
             *prog = Programmer::default();
@@ -382,9 +500,14 @@ pub fn programmer_panel_docked(
 
     // Hotkey hint
     ui.horizontal(|ui| {
+        let hint = if has_pan_tilt {
+            "←↑→↓ pan/tilt  ·  +/− dimmer  ·  Z zoom  ·  W/X/C colour"
+        } else {
+            "+/− dimmer  ·  W/X/C colour"
+        };
         ui.add_space(((available_width - 300.0) * 0.5).max(0.0));
         ui.label(
-            RichText::new("←↑→↓ pan/tilt  ·  +/− dimmer  ·  Z zoom  ·  W/X/C colour")
+            RichText::new(hint)
                 .size(9.0)
                 .monospace()
                 .color(FG_FAINT),

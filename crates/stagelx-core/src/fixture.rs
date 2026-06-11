@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use crate::types::{DmxAddress, FixtureId};
 
-/// Pre-computed GDTF channel offsets for the 8 most common attributes.
+/// Pre-computed GDTF channel offsets for the most common attributes.
 /// Eliminates per-tick string lookups in the DMX projection path.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
 pub struct DmxChannelMap {
@@ -16,6 +16,12 @@ pub struct DmxChannelMap {
     pub gobo: Option<u16>,
     pub gobo_rotation: Option<u16>,
     pub color_wheel: Option<u16>,
+    /// ColorMacro1 — preset colour-combination selector (e.g. derby/FX lights).
+    pub color_macro: Option<u16>,
+    /// Rotation — motor spin speed/index (e.g. derby/prism rotation).
+    pub rotation: Option<u16>,
+    /// Strobe channel offset.
+    pub strobe: Option<u16>,
 }
 
 /// A patched fixture instance in the show.

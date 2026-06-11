@@ -73,6 +73,17 @@ pub fn on_record_stage_cue(
                 .map(|off| buf.get(base + off) as f32 / 255.0)
                 .unwrap_or(0.0);
 
+            let color_macro = inst
+                .channel_map
+                .color_macro
+                .map(|off| buf.get(base + off))
+                .unwrap_or(0);
+            let rotation = inst
+                .channel_map
+                .rotation
+                .map(|off| buf.get(base + off) as f32 / 255.0)
+                .unwrap_or(0.0);
+
             CueValues {
                 dimmer,
                 pan,
@@ -82,6 +93,8 @@ pub fn on_record_stage_cue(
                 color: [red, green, blue],
                 gobo_index,
                 gobo_spin,
+                color_macro,
+                rotation,
             }
         } else {
             // Generic 8-ch inverse: Dimmer | Pan MSB | Pan Fine | Tilt MSB | Tilt Fine | R | G | B
@@ -101,6 +114,8 @@ pub fn on_record_stage_cue(
                 color: [red, green, blue],
                 gobo_index: 0,
                 gobo_spin: 0.0,
+                color_macro: 0,
+                rotation: 0.0,
             }
         };
 

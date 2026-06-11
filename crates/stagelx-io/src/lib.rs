@@ -3,6 +3,7 @@ pub mod config;
 pub mod error;
 pub mod midi;
 pub mod osc;
+pub mod persist;
 pub mod sacn;
 pub mod stats;
 pub mod supervisor;
@@ -26,6 +27,7 @@ use usb::{UsbDmxState, usb_manage_device, usb_send};
 use midi::{MidiState, MidiTarget, midi_manage_connection, midi_receive};
 use osc::{OscState, osc_manage_socket, osc_receive};
 use supervisor::{IoSupervisor, io_supervisor_tick};
+use persist::{load_io_config_on_startup, save_io_config_system};
 use stagelx_dmx::engine::DmxEngineRes;
 use stagelx_dmx::programmer_to_dmx;
 
@@ -59,6 +61,7 @@ impl Plugin for IoPlugin {
             .insert_non_send_resource(MidiState::default())
             .init_resource::<MidiTarget>()
             .insert_resource(Time::<Fixed>::from_hz(DMX_OUTPUT_HZ))
+            .add_systems(Startup, load_io_config_on_startup)
             // Every render frame: manage sockets/devices, drain incoming packets.
             .add_systems(
                 Update,
@@ -73,6 +76,13 @@ impl Plugin for IoPlugin {
                     osc_receive,
                     midi_receive,
                     io_supervisor_tick,
+                    save_io_config_system.run_if(
+                        resource_changed::<ArtNetConfig>
+                            .or(resource_changed::<SacnConfig>)
+                            .or(resource_changed::<UsbConfig>)
+                            .or(resource_changed::<MidiConfig>)
+                            .or(resource_changed::<OscConfig>),
+                    ),
                 )
                     .chain(),
             )

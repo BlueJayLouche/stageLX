@@ -3,8 +3,10 @@
 //! Contains programmer state, performance diagnostics, cue data,
 //! and venue-loading events.
 
+use std::collections::HashMap;
 use bevy::prelude::*;
 use stagelx_gdtf::FixtureLibrary;
+use stagelx_core::types::FixtureId;
 
 pub mod cue;
 pub mod show_file;
@@ -42,34 +44,93 @@ pub struct LoadMvrStructureEvent {
 
 // ─── Programmer ───────────────────────────────────────────────────────────────
 
-/// Normalised programmer state — all channel values 0.0–1.0.
-/// Written by the UI and keyboard handler; read by render and DMX output.
-#[derive(Resource, Clone, PartialEq)]
-pub struct Programmer {
+/// Per-fixture programmer values — normalised 0.0–1.0 unless noted.
+#[derive(Clone, Debug)]
+pub struct ProgrammerValues {
     pub pan: f32,
     pub tilt: f32,
     pub dimmer: f32,
     pub color: [f32; 3],
+    pub zoom: f32,
+    pub strobe: f32,
+    pub gobo_index: usize,
+    pub gobo_spin: f32,
+    /// Raw DMX value (0–255) for ColorMacro1 — color preset selector on FX lights.
+    pub color_macro: u8,
+    /// Normalised motor rotation speed/index (0.0–1.0 → DMX 0–255).
+    pub rotation: f32,
+}
+
+impl Default for ProgrammerValues {
+    fn default() -> Self {
+        Self {
+            pan: 0.5,
+            tilt: 0.62,
+            dimmer: 1.0,
+            color: [1.0, 1.0, 1.0],
+            zoom: 0.0,
+            strobe: 0.0,
+            gobo_index: 0,
+            gobo_spin: 0.0,
+            color_macro: 0,
+            rotation: 0.0,
+        }
+    }
+}
+
+/// Global programmer resource.
+///
+/// `pan/tilt/dimmer/…` are the **active editor values** — what the UI sliders
+/// show and what the 3-D render uses.  They are always the values for whichever
+/// fixture(s) are currently selected.
+///
+/// `fixture_values` is the **per-fixture store**: a fixture is "in the
+/// programmer" once it has been selected and touched.  It retains its last
+/// values after being deselected.  The DMX output reads from this map.
+#[derive(Resource, Clone)]
+pub struct Programmer {
+    // ── Active editor (display) values ────────────────────────────────────────
+    pub pan: f32,
+    pub tilt: f32,
+    pub dimmer: f32,
+    pub color: [f32; 3],
+    pub zoom: f32,
+    pub strobe: f32,
+    pub gobo_index: usize,
+    pub gobo_spin: f32,
+    pub color_macro: u8,
+    pub rotation: f32,
+    // ── Meta (not per-fixture) ────────────────────────────────────────────────
     pub pan_range: f32,
     pub tilt_range: f32,
-    /// 0.0 = narrowest beam (5°), 1.0 = widest beam (45°).
-    pub zoom: f32,
-    /// 0.0 = shutter open (no strobe), 1.0 = fastest strobe (~25 Hz).
-    pub strobe: f32,
-    /// Index into GoboLibrary (0 = open beam).
-    pub gobo_index: usize,
-    /// Gobo spin speed in rotations per second (0.0 = static).
-    pub gobo_spin: f32,
+    // ── Per-fixture store ─────────────────────────────────────────────────────
+    pub fixture_values: HashMap<FixtureId, ProgrammerValues>,
+    /// Set by apply_cue_to_programmer / on_load_cue_into_programmer when the
+    /// display fields are changed programmatically (not by the user).
+    /// programmer_update resets the baseline instead of writing back when this is true.
+    pub cue_load_pending: bool,
+}
+
+/// `PartialEq` compares only the active display fields so that the render
+/// system's change-detection (`*last != *current`) is not triggered by writes
+/// to `fixture_values` that happen every frame.
+impl PartialEq for Programmer {
+    fn eq(&self, other: &Self) -> bool {
+        self.pan         == other.pan
+            && self.tilt         == other.tilt
+            && self.dimmer       == other.dimmer
+            && self.color        == other.color
+            && self.zoom         == other.zoom
+            && self.strobe       == other.strobe
+            && self.gobo_index   == other.gobo_index
+            && self.gobo_spin    == other.gobo_spin
+    }
 }
 
 impl Default for Programmer {
     fn default() -> Self {
         Self {
             pan: 0.5,
-            // Angle the beams ~32° off vertical (downstage, away from the FOH
-            // camera) instead of straight down, so the full length of the
-            // ray-marched cones reads in all three views on startup.
-            // tilt_deg = (tilt − 0.5) × tilt_range.
             tilt: 0.62,
             dimmer: 1.0,
             color: [1.0, 1.0, 1.0],
@@ -79,7 +140,75 @@ impl Default for Programmer {
             strobe: 0.0,
             gobo_index: 0,
             gobo_spin: 0.0,
+            color_macro: 0,
+            rotation: 0.0,
+            fixture_values: HashMap::new(),
+            cue_load_pending: false,
         }
+    }
+}
+
+impl Programmer {
+    /// Snapshot the active display fields into a `ProgrammerValues`.
+    pub fn active_values(&self) -> ProgrammerValues {
+        ProgrammerValues {
+            pan: self.pan,
+            tilt: self.tilt,
+            dimmer: self.dimmer,
+            color: self.color,
+            zoom: self.zoom,
+            strobe: self.strobe,
+            gobo_index: self.gobo_index,
+            gobo_spin: self.gobo_spin,
+            color_macro: self.color_macro,
+            rotation: self.rotation,
+        }
+    }
+
+    /// Effective values for a single fixture, for systems that must render or
+    /// output each fixture independently (DMX projection, 3-D articulation).
+    ///
+    /// Returns the fixture's stored per-fixture entry; falls back to the active
+    /// display fields for fixtures that have never been individually programmed.
+    pub fn values_for(&self, id: FixtureId) -> ProgrammerValues {
+        self.fixture_values
+            .get(&id)
+            .cloned()
+            .unwrap_or_else(|| self.active_values())
+    }
+
+    /// Copy a `ProgrammerValues` snapshot into the active display fields.
+    pub fn load_values(&mut self, v: &ProgrammerValues) {
+        self.pan         = v.pan;
+        self.tilt        = v.tilt;
+        self.dimmer      = v.dimmer;
+        self.color       = v.color;
+        self.zoom        = v.zoom;
+        self.strobe      = v.strobe;
+        self.gobo_index  = v.gobo_index;
+        self.gobo_spin   = v.gobo_spin;
+        self.color_macro = v.color_macro;
+        self.rotation    = v.rotation;
+    }
+}
+
+// ─── EguiViewportRect ─────────────────────────────────────────────────────────
+
+/// The egui logical-pixel rect occupied by the central 3D viewport.
+/// Written each frame by `ui_root_system`; read by `foh_camera_input` to
+/// decide whether mouse input should be routed to the camera or ignored.
+#[derive(Resource, Default, Clone, Copy)]
+pub struct EguiViewportRect {
+    pub min_x: f32,
+    pub min_y: f32,
+    pub max_x: f32,
+    pub max_y: f32,
+    pub valid: bool,
+}
+
+impl EguiViewportRect {
+    pub fn contains(&self, x: f32, y: f32) -> bool {
+        self.valid && x >= self.min_x && x <= self.max_x && y >= self.min_y && y <= self.max_y
     }
 }
 

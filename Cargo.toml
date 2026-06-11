@@ -21,7 +21,7 @@ stagelx-show   = { path = "crates/stagelx-show" }
 stagelx-io     = { path = "crates/stagelx-io" }
 stagelx-render = { path = "crates/stagelx-render" }
 stagelx-ui     = { path = "crates/stagelx-ui" }
-ds3            = { git = "https://github.com/BlueJayLouche/3ds-rs", rev = "d83b7921eab23a607443c4cd277a9d9878e519c3" }
+ds3            = "0.1"
 
 # Shared external deps
 bevy              = { version = "0.18.0" }
@@ -59,6 +59,10 @@ edition = "2021"
 name = "stagelx"
 path = "src/main.rs"
 
+[[bin]]
+name = "gdtf-sync"
+path = "src/bin/gdtf_sync.rs"
+
 [[bench]]
 name = "spawn_500"
 harness = false
@@ -78,3 +82,7 @@ stagelx-show   = { workspace = true }
 stagelx-io     = { workspace = true }
 stagelx-render = { workspace = true }
 stagelx-ui     = { workspace = true }
+# gdtf-sync binary only
+ureq           = { version = "2", features = ["json"] }
+serde_json     = "1"
+serde          = { version = "1", features = ["derive"] }

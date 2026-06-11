@@ -4,7 +4,8 @@ use stagelx_core::{fixture::FixtureInstance, types::{DmxAddress, FixtureId}};
 
 use crate::theme::*;
 use crate::widgets;
-use crate::{FixtureLibraryRes, PatchEditState, PatchRes, PatchSelection, SpawnFixtureEvent};
+use crate::{DespawnFixtureEvent, FixtureLibraryRes, PatchEditState, PatchRes, PatchSelection, SpawnFixtureEvent};
+use stagelx_show::Programmer;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Patch Panel (docked / inline)
@@ -34,6 +35,7 @@ pub fn patch_panel_docked(
     edit: &mut PatchEditState,
     patch_sel: &mut PatchSelection,
     commands: &mut Commands,
+    programmer: &mut Programmer,
 ) {
     let available_width = ui.available_width();
 
@@ -41,6 +43,17 @@ pub fn patch_panel_docked(
     let mut filter: PatchFilterState = ui.ctx().data_mut(|d| {
         d.get_temp_mut_or_insert_with(filter_id, PatchFilterState::default).clone()
     });
+
+    // ── Delete key: remove all selected fixtures ──────────────────────────────
+    if ui.ctx().input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace)) {
+        let to_delete: Vec<FixtureId> = patch_sel.selected_ids.iter().copied().collect();
+        for id in to_delete {
+            patch.0.remove(id);
+            patch_sel.selected_ids.remove(&id);
+            programmer.fixture_values.remove(&id);
+            commands.trigger(DespawnFixtureEvent(id));
+        }
+    }
 
     // ── Toolbar ───────────────────────────────────────────────────────────────
     ui.horizontal(|ui| {
@@ -64,6 +77,7 @@ pub fn patch_panel_docked(
     });
 
     // ── Fixture rows (Tier 2 #12: TableBuilder) ───────────────────────────────
+    let mut patch_ids_to_delete: Vec<FixtureId> = Vec::new();
     let mut fixtures: Vec<_> = patch.0.fixtures().collect();
     fixtures.sort_by_key(|f| f.id.0);
 
@@ -209,31 +223,43 @@ pub fn patch_panel_docked(
                             );
                             x += cols[4];
 
-                            // Status
-                            painter.text(
-                                Pos2::new(x + cols[5] - 4.0, rect.center().y),
-                                egui::Align2::RIGHT_CENTER,
-                                "OK",
-                                font_body(),
-                                FG_FAINT,
+                            // Delete button (×)
+                            let btn_size = Vec2::splat(18.0);
+                            let btn_pos = Pos2::new(
+                                x + cols[5] - btn_size.x - 4.0,
+                                rect.center().y - btn_size.y * 0.5,
                             );
+                            let btn_rect = egui::Rect::from_min_size(btn_pos, btn_size);
+                            let delete_clicked = ui.put(
+                                btn_rect,
+                                egui::Button::new(RichText::new("×").size(11.0).color(FG_MUTED))
+                                    .fill(Color32::TRANSPARENT)
+                                    .stroke(Stroke::NONE),
+                            ).clicked();
+                            if delete_clicked {
+                                let id = f.id;
+                                patch_ids_to_delete.push(id);
+                            }
                         }
                     }
                 });
         });
 
     // ── Footer ────────────────────────────────────────────────────────────────
+    let fixture_count = fixtures.len();
     ui.horizontal(|ui| {
-        let live_count = fixtures.len(); // placeholder
         ui.label(RichText::new(format!("{} selected", patch_sel.selected_ids.len())).size(10.0).color(ACCENT).monospace());
         ui.label(RichText::new("·").size(10.0).color(FG_MUTED));
-        ui.label(RichText::new(format!("{} patched", fixtures.len())).size(10.0).color(FG).monospace());
+        ui.label(RichText::new(format!("{} patched", fixture_count)).size(10.0).color(FG).monospace());
         ui.label(RichText::new("·").size(10.0).color(FG_MUTED));
-        ui.label(RichText::new(format!("{} live", live_count)).size(10.0).color(RX).monospace());
+        ui.label(RichText::new(format!("{} live", fixture_count)).size(10.0).color(RX).monospace());
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.label(RichText::new("U1 81/512  ·  U2 65/512").size(10.0).monospace().color(FG_FAINT));
         });
     });
+
+    // Drop the fixtures borrow before mutating patch
+    drop(fixtures);
 
     // ── Add Fixture form ──────────────────────────────────────────────────────
     widgets::card(ui, |ui| {
@@ -320,6 +346,14 @@ pub fn patch_panel_docked(
     ui.ctx().data_mut(|d| {
         d.insert_temp(filter_id, filter);
     });
+
+    // Process × button deletes (after `fixtures` borrow is released via drop above)
+    for id in patch_ids_to_delete {
+        patch.0.remove(id);
+        patch_sel.selected_ids.remove(&id);
+        programmer.fixture_values.remove(&id);
+        commands.trigger(DespawnFixtureEvent(id));
+    }
 }
 
 fn add_fixture(

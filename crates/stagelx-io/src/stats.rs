@@ -55,4 +55,6 @@ pub struct OscStats {
     pub rx_count: u64,
     pub status: ProtocolStatus,
     pub last_rx_at: Option<Instant>,
+    /// Last N received OSC address patterns (for debugging).
+    pub last_messages: Vec<String>,
 }

@@ -88,9 +88,9 @@ pub fn io_panel_docked(
     match state.active_protocol {
         ActiveProtocol::ArtNet => artnet_config(ui, artnet_cfg, artnet_nodes),
         ActiveProtocol::Sacn => sacn_config(ui, sacn_cfg),
-        ActiveProtocol::Usb => usb_config(ui, usb_cfg, usb_stats),
+        ActiveProtocol::Usb => usb_config(ui, usb_cfg, usb_stats, &mut state.scanned_ports),
         ActiveProtocol::Midi => midi_config(ui, midi_cfg, midi_target),
-        ActiveProtocol::Osc => osc_config(ui, osc_cfg),
+        ActiveProtocol::Osc => osc_config(ui, osc_cfg, osc_stats),
     }
 
     // ── TX/RX counters ────────────────────────────────────────────────────────
@@ -238,7 +238,7 @@ fn sacn_config(ui: &mut Ui, cfg: &mut SacnConfig) {
     });
 }
 
-fn usb_config(ui: &mut Ui, cfg: &mut UsbConfig, stats: &UsbStats) {
+fn usb_config(ui: &mut Ui, cfg: &mut UsbConfig, stats: &UsbStats, scanned_ports: &mut Vec<String>) {
     config_row(ui, "State", |ui| {
         let mut en = cfg.tx_enabled;
         widgets::toggle(ui, &mut en, "TX ENABLED");
@@ -246,9 +246,32 @@ fn usb_config(ui: &mut Ui, cfg: &mut UsbConfig, stats: &UsbStats) {
     });
     config_row(ui, "Port", |ui| {
         ui.add_sized([130.0, 24.0], egui::TextEdit::singleline(&mut cfg.port).hint_text("/dev/tty.usbserial-…").text_color(FG));
-        if ui.add_sized([24.0, 24.0], egui::Button::new("▾").fill(BG_RAISED).stroke(Stroke::new(1.0, BORDER))).on_hover_text("Enumerate serial ports").clicked() {
-            // TODO: populate usb_port from serialport::available_ports() via IoSupervisor
+        let popup_id = ui.make_persistent_id("usb_port_popup");
+        let btn = ui.add_sized([24.0, 24.0], egui::Button::new("▾").fill(BG_RAISED).stroke(Stroke::new(1.0, BORDER))).on_hover_text("Enumerate serial ports");
+        if btn.clicked() {
+            *scanned_ports = serialport::available_ports()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|p| p.port_name)
+                .collect();
+            #[allow(deprecated)]
+            ui.memory_mut(|m| m.toggle_popup(popup_id));
         }
+        #[allow(deprecated)]
+        egui::popup_below_widget(ui, popup_id, &btn, egui::PopupCloseBehavior::CloseOnClickOutside, |ui| {
+            ui.set_min_width(180.0);
+            if scanned_ports.is_empty() {
+                ui.label(egui::RichText::new("No serial ports found").size(11.0).color(FG_MUTED));
+            } else {
+                for port in scanned_ports.iter() {
+                    if ui.selectable_label(cfg.port == *port, port).clicked() {
+                        cfg.port.clone_from(port);
+                        #[allow(deprecated)]
+                        ui.memory_mut(|m| m.close_popup(popup_id));
+                    }
+                }
+            }
+        });
     });
     config_row(ui, "Universe", |ui| {
         ui.add(egui::DragValue::new(&mut cfg.universe).range(1_u16..=32767_u16));
@@ -363,7 +386,7 @@ fn midi_config(ui: &mut Ui, cfg: &mut MidiConfig, target: &MidiTarget) {
     });
 }
 
-fn osc_config(ui: &mut Ui, cfg: &mut OscConfig) {
+fn osc_config(ui: &mut Ui, cfg: &mut OscConfig, stats: &OscStats) {
     config_row(ui, "State", |ui| {
         let mut en = cfg.enabled;
         widgets::toggle(ui, &mut en, "LISTENING");
@@ -382,4 +405,14 @@ fn osc_config(ui: &mut Ui, cfg: &mut OscConfig) {
         ui.label(RichText::new("/cue/back").size(11.0).monospace().color(ACCENT));
         ui.label(RichText::new("trigger cue playback").size(9.0).monospace().color(FG_MUTED));
     });
+
+    if !stats.last_messages.is_empty() {
+        widgets::card(ui, |ui| {
+            widgets::eyebrow_widget(ui, "Last Received");
+            ui.add_space(2.0);
+            for line in stats.last_messages.iter().rev() {
+                ui.label(RichText::new(line).size(10.0).monospace().color(FG_SECONDARY));
+            }
+        });
+    }
 }
