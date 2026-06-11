@@ -308,6 +308,11 @@ pub struct LoadCueIntoProgrammerEvent(pub usize);
 #[derive(Event, Debug, Clone)]
 pub struct UpdateCueEvent;
 
+/// Jump directly to a cue by its 1-based display number (e.g. OSC /cue/2).
+/// Snaps any in-progress fade, then applies the target cue with its fade_in time.
+#[derive(Event, Debug, Clone, Copy)]
+pub struct JumpToCueEvent(pub usize);
+
 // ─── Observer handlers ────────────────────────────────────────────────────────
 
 pub fn on_record_cue(
@@ -527,6 +532,40 @@ pub fn on_update_cue(
     }
 
     commands.trigger(crate::show_file::SaveShowEvent);
+}
+
+pub fn on_jump_to_cue(
+    trigger: On<JumpToCueEvent>,
+    stack: Res<CueStack>,
+    mut playhead: ResMut<CuePlayhead>,
+    mut programmer: ResMut<Programmer>,
+) {
+    // Event carries a 1-based display number; convert to 0-based index.
+    let display_num = trigger.event().0;
+    if display_num == 0 { return; }
+    let idx = display_num - 1;
+    let Some(target_cue) = stack.cues.get(idx) else {
+        warn!("JumpToCue: cue {} not found (stack has {})", display_num, stack.cues.len());
+        return;
+    };
+
+    playhead.snap_fade();
+
+    if target_cue.fade_in_ms > 0 {
+        let from = playhead.current_cue_index
+            .and_then(|i| stack.cues.get(i))
+            .map(|c| c.snapshot.clone())
+            .unwrap_or_default();
+        playhead.state = PlayheadState::Fading {
+            start: std::time::Instant::now(),
+            duration_ms: target_cue.fade_in_ms,
+            from,
+            to: target_cue.snapshot.clone(),
+        };
+    }
+
+    playhead.current_cue_index = Some(idx);
+    apply_cue_to_programmer(target_cue, &mut programmer);
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────

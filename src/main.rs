@@ -10,7 +10,7 @@ use stagelx_io::IoPlugin;
 use stagelx_render::StageLxRenderPlugin;
 use stagelx_show::{
     advance_cue_fade, auto_load_show_on_startup,
-    on_back_cue, on_delete_cue, on_go_cue, on_load_cue_into_programmer,
+    on_back_cue, on_delete_cue, on_go_cue, on_jump_to_cue, on_load_cue_into_programmer,
     on_load_show, on_new_show, on_record_cue, on_save_show, on_update_cue,
 };
 use stagelx_ui::StageLxUiPlugin;
@@ -38,7 +38,7 @@ fn setup_ui_camera(mut commands: Commands) {
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(LogPlugin {
-            filter: "warn,bevy_render::camera=error".to_string(),
+            filter: "warn,bevy_render::camera=error,stagelx_io::osc=info,stagelx_io::persist=info".to_string(),
             ..default()
         }).set(WindowPlugin {
             primary_window: Some(Window {
@@ -74,6 +74,7 @@ fn main() {
         .add_observer(on_new_show)
         .add_observer(on_go_cue)
         .add_observer(on_back_cue)
+        .add_observer(on_jump_to_cue)
         .add_observer(on_delete_cue)
         // Cues output entirely through the programmer (priority 200): GO/BACK
         // copy the cue into fixture_values and advance_cue_fade interpolates there.

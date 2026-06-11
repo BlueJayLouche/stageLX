@@ -7,6 +7,8 @@ use crate::{ActiveProtocol, IoPanelState};
 use stagelx_io::artnet::ArtNetNodeTable;
 use stagelx_io::config::{ArtNetConfig, MidiConfig, OscConfig, SacnConfig, UsbConfig};
 use stagelx_io::midi::MidiTarget;
+use stagelx_io::osc::OscState;
+use std::sync::atomic::Ordering;
 use stagelx_io::stats::{ArtNetStats, MidiStats, OscStats, SacnStats, UsbStats};
 use stagelx_show::ProtocolStatus;
 
@@ -29,6 +31,7 @@ pub fn io_panel_docked(
     midi_target: &MidiTarget,
     osc_cfg: &mut OscConfig,
     osc_stats: &OscStats,
+    osc_state: &OscState,
     state: &mut IoPanelState,
 ) {
     // ── Protocol strip ────────────────────────────────────────────────────────
@@ -90,7 +93,7 @@ pub fn io_panel_docked(
         ActiveProtocol::Sacn => sacn_config(ui, sacn_cfg),
         ActiveProtocol::Usb => usb_config(ui, usb_cfg, usb_stats, &mut state.scanned_ports),
         ActiveProtocol::Midi => midi_config(ui, midi_cfg, midi_target),
-        ActiveProtocol::Osc => osc_config(ui, osc_cfg, osc_stats),
+        ActiveProtocol::Osc => osc_config(ui, osc_cfg, osc_stats, osc_state),
     }
 
     // ── TX/RX counters ────────────────────────────────────────────────────────
@@ -386,7 +389,7 @@ fn midi_config(ui: &mut Ui, cfg: &mut MidiConfig, target: &MidiTarget) {
     });
 }
 
-fn osc_config(ui: &mut Ui, cfg: &mut OscConfig, stats: &OscStats) {
+fn osc_config(ui: &mut Ui, cfg: &mut OscConfig, stats: &OscStats, state: &OscState) {
     config_row(ui, "State", |ui| {
         let mut en = cfg.enabled;
         widgets::toggle(ui, &mut en, "LISTENING");
@@ -396,13 +399,36 @@ fn osc_config(ui: &mut Ui, cfg: &mut OscConfig, stats: &OscStats) {
         ui.add(egui::DragValue::new(&mut cfg.port).range(1024_u16..=65535_u16));
     });
 
+    // ── TouchOSC connection guide ──────────────────────────────────────────────
+    if cfg.enabled {
+        if let (Some(ip), Some(port)) = (&state.local_ip, state.bound_port) {
+            let raw = state.raw_rx_count.load(Ordering::Relaxed);
+            let errs = state.decode_errors.load(Ordering::Relaxed);
+            widgets::card(ui, |ui| {
+                widgets::eyebrow_widget(ui, "TouchOSC Setup");
+                ui.add_space(2.0);
+                ui.label(RichText::new("Send to:").size(10.0).color(FG_MUTED));
+                ui.horizontal(|ui| {
+                    let addr = format!("{}:{}", ip, port);
+                    ui.label(RichText::new(&addr).size(12.0).monospace().strong().color(ACCENT));
+                });
+                ui.add_space(4.0);
+                ui.label(RichText::new("In TouchOSC: Connection → OSC").size(9.0).monospace().color(FG_FAINT));
+                ui.label(RichText::new(format!("Host: {}  Send Port: {}", ip, port)).size(9.0).monospace().color(FG_FAINT));
+                ui.add_space(4.0);
+                // Diagnostic counters — tell user whether UDP is arriving at all
+                let raw_color = if raw > 0 { ACCENT } else { FG_MUTED };
+                ui.label(RichText::new(format!("UDP rx: {}  decode errors: {}", raw, errs)).size(9.0).monospace().color(raw_color));
+            });
+        }
+    }
+
     widgets::card(ui, |ui| {
         widgets::eyebrow_widget(ui, "Address Patterns");
         ui.label(RichText::new("/fixture/{id}/{attr}").size(11.0).monospace().color(ACCENT));
         ui.label(RichText::new("f32 · 0.0–1.0 normalised").size(9.0).monospace().color(FG_MUTED));
         ui.add_space(4.0);
-        ui.label(RichText::new("/cue/go").size(11.0).monospace().color(ACCENT));
-        ui.label(RichText::new("/cue/back").size(11.0).monospace().color(ACCENT));
+        ui.label(RichText::new("/cue/go  /cue/back").size(11.0).monospace().color(ACCENT));
         ui.label(RichText::new("trigger cue playback").size(9.0).monospace().color(FG_MUTED));
     });
 

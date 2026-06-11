@@ -76,13 +76,7 @@ impl Plugin for IoPlugin {
                     osc_receive,
                     midi_receive,
                     io_supervisor_tick,
-                    save_io_config_system.run_if(
-                        resource_changed::<ArtNetConfig>
-                            .or(resource_changed::<SacnConfig>)
-                            .or(resource_changed::<UsbConfig>)
-                            .or(resource_changed::<MidiConfig>)
-                            .or(resource_changed::<OscConfig>),
-                    ),
+                    save_io_config_system,
                 )
                     .chain(),
             )

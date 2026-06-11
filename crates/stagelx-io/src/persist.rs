@@ -46,13 +46,23 @@ pub fn load_io_config_on_startup(
     info!("I/O config loaded from {}", path.display());
 }
 
+const SAVE_DEBOUNCE_SECS: f64 = 2.0;
+
 pub fn save_io_config_system(
     artnet: Res<ArtNetConfig>,
     sacn: Res<SacnConfig>,
     usb: Res<UsbConfig>,
     midi: Res<MidiConfig>,
     osc: Res<OscConfig>,
+    time: Res<Time>,
+    mut last_saved: Local<f64>,
 ) {
+    let now = time.elapsed_secs_f64();
+    if now - *last_saved < SAVE_DEBOUNCE_SECS {
+        return;
+    }
+    *last_saved = now;
+
     let saved = SavedIoConfig {
         artnet: artnet.clone(),
         sacn: sacn.clone(),

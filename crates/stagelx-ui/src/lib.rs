@@ -21,6 +21,7 @@ pub use stagelx_show::{
 use stagelx_io::artnet::ArtNetNodeTable;
 use stagelx_io::config::{ArtNetConfig, MidiConfig, OscConfig, SacnConfig, UsbConfig};
 use stagelx_io::midi::MidiTarget;
+use stagelx_io::osc::OscState;
 use stagelx_io::stats::{ArtNetStats, MidiStats, OscStats, SacnStats, UsbStats};
 use stagelx_show::ProtocolStatus;
 
@@ -39,6 +40,7 @@ struct IoParams<'w> {
     midi_target: Res<'w, MidiTarget>,
     osc_cfg: ResMut<'w, OscConfig>,
     osc_stats: Res<'w, OscStats>,
+    osc_state: Res<'w, OscState>,
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
@@ -748,6 +750,7 @@ fn ui_root_system(
                         &io.midi_target,
                         &mut io.osc_cfg,
                         &io.osc_stats,
+                        &io.osc_state,
                         &mut io.state,
                     );
                 }
@@ -1036,6 +1039,7 @@ fn ui_root_system(
                     &io.midi_target,
                     &mut io.osc_cfg,
                     &io.osc_stats,
+                    &io.osc_state,
                     &mut io.state,
                 );
                 if ui.button("Re-dock").clicked() {
