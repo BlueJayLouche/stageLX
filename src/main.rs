@@ -5,8 +5,8 @@ use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
 use bevy::log::LogPlugin;
 use bevy::render::camera::CameraRenderGraph;
 use bevy_egui::{EguiContext, EguiGlobalSettings, EguiPlugin, PrimaryEguiContext};
-use stagelx_dmx::{cue_to_dmx, on_record_stage_cue};
-use stagelx_io::{IoPlugin, dmx_engine_tick};
+use stagelx_dmx::on_record_stage_cue;
+use stagelx_io::IoPlugin;
 use stagelx_render::StageLxRenderPlugin;
 use stagelx_show::{
     advance_cue_fade, auto_load_show_on_startup,
@@ -75,11 +75,12 @@ fn main() {
         .add_observer(on_go_cue)
         .add_observer(on_back_cue)
         .add_observer(on_delete_cue)
-        // Cue fades are driven through the programmer (priority 200) so DMX and
-        // the 3-D view animate together.
+        // Cues output entirely through the programmer (priority 200): GO/BACK
+        // copy the cue into fixture_values and advance_cue_fade interpolates there.
+        // The old priority-150 cue_to_dmx source is intentionally NOT scheduled —
+        // it double-asserted cue values and survived a programmer clear, leaving
+        // fixtures (e.g. a motor channel) stuck with no way to override.
         .add_systems(Update, advance_cue_fade)
-        // Cue playback (priority 150) writes before engine merge.
-        .add_systems(FixedUpdate, cue_to_dmx.before(dmx_engine_tick))
         .run();
 }
 

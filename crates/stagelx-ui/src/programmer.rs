@@ -447,6 +447,12 @@ pub fn programmer_panel_docked(
     }
     if let Some(dmx) = selected_mode {
         prog.color_macro = dmx;
+        // Reflect the preset's representative colour in the display RGB so the
+        // 3-D viewport tints macro-colour fixtures correctly (DMX still sends the
+        // color_macro channel; RGB is ignored by fixtures without RGB channels).
+        if let Some((_, rgb, _)) = COLOR_MODES.iter().find(|(_, _, d)| *d == dmx) {
+            prog.color = [rgb[0] as f32 / 255.0, rgb[1] as f32 / 255.0, rgb[2] as f32 / 255.0];
+        }
     }
     } // has_color_macro
 

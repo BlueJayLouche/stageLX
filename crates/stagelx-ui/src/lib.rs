@@ -16,7 +16,7 @@ pub use stagelx_show::{
     BackCueEvent, CuePlayhead, CueStack, DeleteCueEvent, EguiViewportRect, FixtureLibraryRes,
     GoCueEvent, LoadMvrStructureEvent, LoadShowEvent, LoadVenueEvent,
     MvrStructureObject, NewShowEvent, PerfDiagnosticsRes, Programmer, ProgrammerValues,
-    RecordCueEvent, SaveShowEvent, VenueLoadState,
+    RecordCueEvent, SaveShowEvent, ShowName, VenueLoadState,
 };
 use stagelx_io::artnet::ArtNetNodeTable;
 use stagelx_io::config::{ArtNetConfig, MidiConfig, OscConfig, SacnConfig, UsbConfig};
@@ -98,16 +98,16 @@ impl AppMode {
 // Stub resources for placeholder data
 // ═══════════════════════════════════════════════════════════════════════════════
 
+/// Title-bar metadata. The show *name* lives in the `ShowName` resource (saved
+/// into the show file); this just tracks when the last save happened.
 #[derive(Resource)]
 pub struct ShowMeta {
-    pub name: String,
     pub last_saved: std::time::Instant,
 }
 
 impl Default for ShowMeta {
     fn default() -> Self {
         Self {
-            name: "tour-2026-mainstage".into(),
             last_saved: std::time::Instant::now(),
         }
     }
@@ -228,6 +228,7 @@ impl Plugin for StageLxUiPlugin {
             .init_resource::<FontsInstalled>()
             .init_resource::<ProgrammerSyncState>()
             .init_resource::<EguiViewportRect>()
+            .add_observer(on_show_saved_update_meta)
             .add_systems(EguiPrimaryContextPass, ui_root_system)
             .add_systems(Update, (sync_midi_target, programmer_update));
     }
@@ -278,7 +279,13 @@ fn programmer_update(
                 programmer.load_values(&vals);
                 sync_state.baseline = Some(vals);
             } else {
-                sync_state.baseline = Some(programmer.active_values());
+                // Un-programmed fixture: reset the display to defaults so it does
+                // not inherit the previously-selected fixture's values. Only an
+                // actual edit (below) puts it into fixture_values, so external
+                // input can still drive it until then.
+                let defaults = ProgrammerValues::default();
+                programmer.load_values(&defaults);
+                sync_state.baseline = Some(defaults);
             }
         } else {
             // No fixtures selected: after a cue load, still reset the baseline
@@ -326,6 +333,13 @@ fn programmer_values_differ(a: &ProgrammerValues, b: &ProgrammerValues) -> bool 
 // (priority 200) from owning every patched fixture and shadowing external input
 // such as OSC (150) on fixtures the operator never touched.
 
+/// Stamp the save time whenever a show is saved, so the title-bar
+/// "SAVED Xs ago" indicator reflects reality (any SaveShowEvent — Ctrl+S,
+/// rename, cue record/edit — counts).
+fn on_show_saved_update_meta(_t: On<SaveShowEvent>, mut meta: ResMut<ShowMeta>) {
+    meta.last_saved = std::time::Instant::now();
+}
+
 fn install_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
     fonts.font_data.insert(
@@ -359,6 +373,7 @@ fn ui_root_system(
     playhead: Res<CuePlayhead>,
     mut capture_mode: ResMut<stagelx_show::CaptureMode>,
     show_meta: Res<ShowMeta>,
+    mut show_name: ResMut<ShowName>,
     perf: Res<PerfDiagnosticsRes>,
     mut open_dialog: ResMut<OpenShowDialog>,
     mut commands: Commands,
@@ -477,9 +492,24 @@ fn ui_root_system(
                 widgets::vertical_divider(ui, 24.0);
                 ui.add_space(14.0);
 
-                // Show name
+                // Show name — inline-editable; click to rename, persists on save.
                 ui.label(RichText::new("Show").size(11.0).color(FG_MUTED));
-                ui.label(RichText::new(&show_meta.name).size(12.0).color(FG).strong());
+                let name_resp = ui.add(
+                    egui::TextEdit::singleline(&mut show_name.0)
+                        .frame(false)
+                        .desired_width(180.0)
+                        .font(egui::FontId::proportional(13.0))
+                        .text_color(FG),
+                );
+                if name_resp.lost_focus() {
+                    if show_name.0.trim().is_empty() {
+                        show_name.0 = "Untitled Show".into();
+                    } else {
+                        show_name.0 = show_name.0.trim().to_string();
+                    }
+                    // Persist the rename (silently writes the show file).
+                    commands.trigger(SaveShowEvent);
+                }
                 widgets::status_dot(ui, widgets::DotState::Live);
                 let saved_ago = format!("SAVED {}s ago", show_meta.last_saved.elapsed().as_secs());
                 ui.label(RichText::new(saved_ago).size(9.0).monospace().color(FG_MUTED));

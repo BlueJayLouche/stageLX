@@ -158,11 +158,12 @@ impl CueStack {
     ) -> usize {
         let mut snapshot = HashMap::new();
         for inst in patch.0.fixtures() {
-            // Use the per-fixture stored values; fall back to the display fields
-            // for fixtures that were never individually selected.
+            // Use the per-fixture stored values. A fixture that was never
+            // programmed records clean defaults — NOT the shared display fields,
+            // which would leak the last-edited fixture's values into it.
             let values = prog.fixture_values.get(&inst.id)
                 .map(CueValues::from_programmer_values)
-                .unwrap_or_else(|| CueValues::from_programmer(prog));
+                .unwrap_or_else(|| CueValues::from_programmer_values(&ProgrammerValues::default()));
             snapshot.insert(inst.id, values);
         }
 
@@ -521,7 +522,7 @@ pub fn on_update_cue(
     for inst in patch.0.fixtures() {
         let values = programmer.fixture_values.get(&inst.id)
             .map(CueValues::from_programmer_values)
-            .unwrap_or_else(|| CueValues::from_programmer(&programmer));
+            .unwrap_or_else(|| CueValues::from_programmer_values(&ProgrammerValues::default()));
         cue.snapshot.insert(inst.id, values);
     }
 
