@@ -58,7 +58,7 @@ impl Plugin for IoPlugin {
             .init_resource::<OscState>()
             .init_resource::<UsbDmxState>()
             .init_resource::<IoSupervisor>()
-            .insert_non_send_resource(MidiState::default())
+            .insert_non_send(MidiState::default())
             .init_resource::<MidiTarget>()
             .insert_resource(Time::<Fixed>::from_hz(DMX_OUTPUT_HZ))
             .add_systems(Startup, load_io_config_on_startup)

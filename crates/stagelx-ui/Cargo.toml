@@ -1,7 +1,7 @@
 [package]
 name    = "stagelx-ui"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 stagelx-core   = { workspace = true }
@@ -11,7 +11,7 @@ stagelx-show   = { workspace = true }
 stagelx-io     = { workspace = true }
 bevy           = { workspace = true }
 bevy_egui      = { workspace = true }
-egui_extras    = "0.33"
-rfd            = "0.15"
+egui_extras    = "0.35"
+rfd            = "0.17"
 serialport     = { workspace = true }
 zip            = { workspace = true }

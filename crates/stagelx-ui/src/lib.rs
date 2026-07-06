@@ -423,33 +423,34 @@ fn ui_root_system(
     }
 
     // Apply global dark style
-    let mut style = (*egui_ctx.style()).clone();
-    style.visuals.dark_mode = true;
-    style.visuals.panel_fill = BG_APP;
-    style.visuals.window_fill = BG_PANEL;
-    style.visuals.window_stroke = Stroke::new(1.0, BORDER);
-    style.visuals.widgets.noninteractive.bg_fill = BG_PANEL;
-    style.visuals.widgets.inactive.bg_fill = BG_RAISED;
-    style.visuals.widgets.hovered.bg_fill = BG_HOVER;
-    style.visuals.widgets.active.bg_fill = BG_INPUT;
-    style.visuals.selection.bg_fill = ACCENT_BG;
-    style.visuals.selection.stroke = Stroke::new(1.0, ACCENT);
-    style.visuals.window_shadow = egui::epaint::Shadow {
-        offset: [0, 6],
-        blur: 20,
-        spread: 2,
-        color: Color32::from_black_alpha(90),
-    };
-    // Global spacing override (Tier 1 #2)
-    style.spacing.item_spacing = Vec2::new(6.0, 4.0);
-    style.spacing.button_padding = Vec2::new(8.0, 4.0);
-    style.spacing.interact_size = Vec2::new(0.0, 24.0);
-    style.spacing.icon_width = 12.0;
-    style.spacing.menu_margin = egui::Margin::same(6);
-    style.spacing.window_margin = egui::Margin::same(0);
-    egui_ctx.set_style(style);
+    egui_ctx.all_styles_mut(|style| {
+        style.visuals.dark_mode = true;
+        style.visuals.panel_fill = BG_APP;
+        style.visuals.window_fill = BG_PANEL;
+        style.visuals.window_stroke = Stroke::new(1.0, BORDER);
+        style.visuals.widgets.noninteractive.bg_fill = BG_PANEL;
+        style.visuals.widgets.inactive.bg_fill = BG_RAISED;
+        style.visuals.widgets.hovered.bg_fill = BG_HOVER;
+        style.visuals.widgets.active.bg_fill = BG_INPUT;
+        style.visuals.selection.bg_fill = ACCENT_BG;
+        style.visuals.selection.stroke = Stroke::new(1.0, ACCENT);
+        style.visuals.window_shadow = egui::epaint::Shadow {
+            offset: [0, 6],
+            blur: 20,
+            spread: 2,
+            color: Color32::from_black_alpha(90),
+        };
+        // Global spacing override (Tier 1 #2)
+        style.spacing.item_spacing = Vec2::new(6.0, 4.0);
+        style.spacing.button_padding = Vec2::new(8.0, 4.0);
+        style.spacing.interact_size = Vec2::new(0.0, 24.0);
+        style.spacing.icon_width = 12.0;
+        style.spacing.menu_margin = egui::Margin::same(6);
+        style.spacing.window_margin = egui::Margin::same(0);
+    });
 
-    let float_frame = egui::Frame::window(&egui_ctx.style())
+    let float_frame = egui::Frame::window(&egui_ctx.global_style());
+    let float_frame = float_frame
         .fill(BG_PANEL)
         .stroke(Stroke::new(1.0, BORDER))
         .shadow(egui::epaint::Shadow {
@@ -459,11 +460,20 @@ fn ui_root_system(
             color: Color32::from_black_alpha(102),
         });
 
+    // Root Ui: egui 0.35 panels render inside a Ui, not the Context.
+    let mut root = egui::Ui::new(
+        egui_ctx.clone(),
+        "stagelx_root".into(),
+        egui::UiBuilder::new()
+            .layer_id(egui::LayerId::background())
+            .max_rect(egui_ctx.viewport_rect()),
+    );
+
     // ── Top bar ───────────────────────────────────────────────────────────────
-    egui::TopBottomPanel::top("top_bar")
-        .exact_height(36.0)
+    egui::Panel::top("top_bar")
+        .exact_size(36.0)
         .frame(egui::Frame::new().fill(BG_CHROME).inner_margin(egui::Margin::same(0)))
-        .show(egui_ctx, |ui| {
+        .show(&mut root, |ui| {
             ui.horizontal(|ui| {
                 ui.set_min_size(Vec2::new(ui.available_width(), 36.0));
                 ui.add_space(10.0);
@@ -498,7 +508,7 @@ fn ui_root_system(
                 ui.label(RichText::new("Show").size(11.0).color(FG_MUTED));
                 let name_resp = ui.add(
                     egui::TextEdit::singleline(&mut show_name.0)
-                        .frame(false)
+                        .frame(egui::Frame::NONE)
                         .desired_width(180.0)
                         .font(egui::FontId::proportional(13.0))
                         .text_color(FG),
@@ -611,10 +621,10 @@ fn ui_root_system(
             .and_then(|n| n.to_str())
             .unwrap_or("—");
 
-        egui::TopBottomPanel::bottom("status_bar")
-            .exact_height(22.0)
+        egui::Panel::bottom("status_bar")
+            .exact_size(22.0)
             .frame(egui::Frame::new().fill(BG_CHROME).inner_margin(egui::Margin::same(0)))
-            .show(egui_ctx, |ui| {
+            .show(&mut root, |ui| {
                 ui.horizontal(|ui| {
                     ui.set_min_size(Vec2::new(ui.available_width(), 22.0));
                     ui.add_space(12.0);
@@ -643,10 +653,11 @@ fn ui_root_system(
 
     // ── Left rail (Cue + Programmer) ──────────────────────────────────────────
     if show_left_rail && (!layout.detached.contains(&PanelKind::Programmer) || !layout.detached.contains(&PanelKind::Cue)) {
-        egui::SidePanel::left("left_rail")
-            .exact_width(300.0)
+        egui::Panel::left("left_rail")
+            .default_size(300.0)
+            .size_range(220.0..=520.0)
             .frame(egui::Frame::new().fill(BG_CHROME).inner_margin(egui::Margin::same(0)))
-            .show(egui_ctx, |ui| {
+            .show(&mut root, |ui| {
                 // ── Cue panel ─────────────────────────────────────────────────────
                 if !layout.detached.contains(&PanelKind::Cue) {
                     ui.horizontal(|ui| {
@@ -711,10 +722,11 @@ fn ui_root_system(
 
     // ── Right rail (DMX I/O) ──────────────────────────────────────────────────
     if show_io && !layout.detached.contains(&PanelKind::Io) {
-        egui::SidePanel::right("right_rail")
-            .exact_width(420.0)
+        egui::Panel::right("right_rail")
+            .default_size(420.0)
+            .size_range(300.0..=640.0)
             .frame(egui::Frame::new().fill(BG_CHROME).inner_margin(egui::Margin::same(0)))
-            .show(egui_ctx, |ui| {
+            .show(&mut root, |ui| {
                 ui.horizontal(|ui| {
                     ui.set_min_size(Vec2::new(0.0, 28.0));
                     ui.add_space(10.0);
@@ -759,11 +771,13 @@ fn ui_root_system(
 
     // ── Bottom strip (Patch + Library) ────────────────────────────────────────
     if show_bottom_strip {
-        egui::TopBottomPanel::bottom("bottom_strip")
-            .exact_height(248.0)
+        egui::Panel::bottom("bottom_strip")
+            .default_size(248.0)
+            .size_range(140.0..=520.0)
+            .resizable(true)
             .show_separator_line(false)
             .frame(egui::Frame::new().fill(BG_APP).inner_margin(egui::Margin::same(0)))
-            .show(egui_ctx, |ui| {
+            .show(&mut root, |ui| {
                 let bottom_rect = ui.max_rect();
                 ui.painter().line_segment([Pos2::new(bottom_rect.min.x, bottom_rect.min.y), Pos2::new(bottom_rect.max.x, bottom_rect.min.y)], Stroke::new(1.0, BORDER));
                 let avail = ui.available_size();
@@ -849,7 +863,7 @@ fn ui_root_system(
     // ── Central panel (viewports only) ────────────────────────────────────────
     egui::CentralPanel::default()
         .frame(egui::Frame::new().fill(Color32::TRANSPARENT))
-        .show(egui_ctx, |ui| {
+        .show(&mut root, |ui| {
             let full_rect = ui.available_rect_before_wrap();
             viewport_rect.min_x = full_rect.min.x;
             viewport_rect.min_y = full_rect.min.y;

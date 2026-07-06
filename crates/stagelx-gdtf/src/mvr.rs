@@ -264,7 +264,11 @@ fn parse_scene_xml(xml: &str) -> Result<ParsedElements, GdtfError> {
             Ok(XmlEvent::Text(ref e))
                 if !matches!(active, ActiveElement::None) =>
             {
-                let text = e.unescape().map(|s| s.into_owned()).unwrap_or_default();
+                let text = e
+                    .xml10_content()
+                    .ok()
+                    .and_then(|s| quick_xml::escape::unescape(&s).ok().map(|u| u.into_owned()))
+                    .unwrap_or_default();
                 match &mut active {
                     ActiveElement::Fixture(data) => {
                         match target {

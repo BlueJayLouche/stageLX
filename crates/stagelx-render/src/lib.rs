@@ -42,7 +42,7 @@ impl Plugin for StageLxRenderPlugin {
             .add_systems(
                 Update,
                 (
-                    scene::update_viewports_on_resize,
+                    scene::sync_viewports_to_ui,
                     resize_beam_render_target,
                     foh_camera_input,
                     foh_camera_update,

@@ -249,7 +249,6 @@ fn usb_config(ui: &mut Ui, cfg: &mut UsbConfig, stats: &UsbStats, scanned_ports:
     });
     config_row(ui, "Port", |ui| {
         ui.add_sized([130.0, 24.0], egui::TextEdit::singleline(&mut cfg.port).hint_text("/dev/tty.usbserial-…").text_color(FG));
-        let popup_id = ui.make_persistent_id("usb_port_popup");
         let btn = ui.add_sized([24.0, 24.0], egui::Button::new("▾").fill(BG_RAISED).stroke(Stroke::new(1.0, BORDER))).on_hover_text("Enumerate serial ports");
         if btn.clicked() {
             *scanned_ports = serialport::available_ports()
@@ -257,24 +256,22 @@ fn usb_config(ui: &mut Ui, cfg: &mut UsbConfig, stats: &UsbStats, scanned_ports:
                 .into_iter()
                 .map(|p| p.port_name)
                 .collect();
-            #[allow(deprecated)]
-            ui.memory_mut(|m| m.toggle_popup(popup_id));
         }
-        #[allow(deprecated)]
-        egui::popup_below_widget(ui, popup_id, &btn, egui::PopupCloseBehavior::CloseOnClickOutside, |ui| {
-            ui.set_min_width(180.0);
-            if scanned_ports.is_empty() {
-                ui.label(egui::RichText::new("No serial ports found").size(11.0).color(FG_MUTED));
-            } else {
-                for port in scanned_ports.iter() {
-                    if ui.selectable_label(cfg.port == *port, port).clicked() {
-                        cfg.port.clone_from(port);
-                        #[allow(deprecated)]
-                        ui.memory_mut(|m| m.close_popup(popup_id));
+        egui::Popup::from_toggle_button_response(&btn)
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+            .show(|ui| {
+                ui.set_min_width(180.0);
+                if scanned_ports.is_empty() {
+                    ui.label(egui::RichText::new("No serial ports found").size(11.0).color(FG_MUTED));
+                } else {
+                    for port in scanned_ports.iter() {
+                        if ui.selectable_label(cfg.port == *port, port).clicked() {
+                            cfg.port.clone_from(port);
+                            ui.close();
+                        }
                     }
                 }
-            }
-        });
+            });
     });
     config_row(ui, "Universe", |ui| {
         ui.add(egui::DragValue::new(&mut cfg.universe).range(1_u16..=32767_u16));

@@ -67,8 +67,8 @@ impl IoSource for OscRxSource {
                 match socket.recv_from(&mut buf) {
                     Ok((n, src)) => {
                         raw_rx.fetch_add(1, Ordering::Relaxed);
-                        match rosc::decoder::decode(&buf[..n]) {
-                            Ok(pkt) => forward_packet(pkt, &tx, &drops),
+                        match rosc::decoder::decode_udp(&buf[..n]) {
+                            Ok((_rest, pkt)) => forward_packet(pkt, &tx, &drops),
                             Err(e) => {
                                 decode_errors.fetch_add(1, Ordering::Relaxed);
                                 warn!("OSC decode error from {src}: {e}  ({n} bytes: {:02x?})", &buf[..n.min(16)]);

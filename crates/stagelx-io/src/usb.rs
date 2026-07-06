@@ -116,6 +116,10 @@ pub struct UsbDmxState {
     startup_rx: Option<Receiver<Result<(), String>>>,
     pub tx_drops: Arc<AtomicU64>,
     last_port: String,
+    /// Earliest time the next open may be attempted after a failure.
+    /// Without this the manage system re-spawns an open thread every frame
+    /// while the device is unplugged (~60 attempts + warn logs per second).
+    retry_at: Option<std::time::Instant>,
 }
 
 impl Default for UsbDmxState {
@@ -128,9 +132,13 @@ impl Default for UsbDmxState {
             startup_rx: None,
             tx_drops: Arc::new(AtomicU64::new(0)),
             last_port: String::new(),
+            retry_at: None,
         }
     }
 }
+
+/// Backoff between failed open attempts.
+const OPEN_RETRY_INTERVAL: Duration = Duration::from_secs(2);
 
 // ─── Systems ──────────────────────────────────────────────────────────────────
 
@@ -151,6 +159,7 @@ pub fn usb_manage_device(
                 info!("USB DMX TX opened: {}", state.last_port);
                 stats.status = ProtocolStatus::Live;
                 state.startup_rx = None;
+                state.retry_at = None;
             }
             Ok(Err(e)) => {
                 warn!("USB DMX TX open failed: {e}");
@@ -160,6 +169,7 @@ pub fn usb_manage_device(
                 // Thread already exited after sending Err; move handle to stopping
                 // so we still wait for OS-level cleanup before any retry.
                 state.stopping = state.tx_handle.take();
+                state.retry_at = Some(std::time::Instant::now() + OPEN_RETRY_INTERVAL);
             }
             Err(TryRecvError::Empty) => {
                 stats.status = ProtocolStatus::Warn; // connecting…
@@ -170,6 +180,7 @@ pub fn usb_manage_device(
                 state.startup_rx = None;
                 state.tx_chan = None;
                 state.stopping = state.tx_handle.take();
+                state.retry_at = Some(std::time::Instant::now() + OPEN_RETRY_INTERVAL);
             }
         }
     }
@@ -192,9 +203,13 @@ pub fn usb_manage_device(
 
     // ── Start TX thread when enabled ──────────────────────────────────────────
     if cfg.tx_enabled && state.tx_chan.is_none() && state.startup_rx.is_none() {
+        // Honour the failure backoff — unless the user changed the port, which
+        // should retry immediately.
+        let backing_off = port == state.last_port
+            && state.retry_at.is_some_and(|t| std::time::Instant::now() < t);
         if port.is_empty() {
             stats.status = ProtocolStatus::Warn;
-        } else {
+        } else if !backing_off {
             let (tx, rx) = bounded::<UsbTxCmd>(1);
             let (shutdown_tx, shutdown_rx) = bounded::<()>(1);
             let (ready_tx, ready_rx) = bounded::<Result<(), String>>(1);

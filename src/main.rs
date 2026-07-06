@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy::camera::visibility::RenderLayers;
-use bevy::core_pipeline::core_3d::graph::Core3d;
+use bevy::core_pipeline::Core3d;
 use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
 use bevy::log::LogPlugin;
 use bevy::render::camera::CameraRenderGraph;
@@ -37,7 +37,12 @@ fn setup_ui_camera(mut commands: Commands) {
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins.set(LogPlugin {
+        .add_plugins(DefaultPlugins.set(TaskPoolPlugin {
+            // Idle profiling showed executor wake/steal churn across ~14 pool
+            // threads outweighing all app systems combined at this world size.
+            // 4 total → 1 io / 1 async / 2 compute.
+            task_pool_options: TaskPoolOptions::with_num_threads(4),
+        }).set(LogPlugin {
             filter: "warn,bevy_render::camera=error,stagelx_io::osc=info,stagelx_io::persist=info".to_string(),
             ..default()
         }).set(WindowPlugin {

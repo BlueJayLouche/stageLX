@@ -36,7 +36,7 @@ fn main() {
     )>::new(world);
 
     let (mut commands, mut meshes, mut materials, mut beam_mats, mut sprite_mats) =
-        state.get_mut(world);
+        state.get_mut(world).unwrap();
 
     let open_gobo: Handle<Image> = Handle::default();
 
@@ -75,7 +75,7 @@ fn main() {
     )>::new(world);
 
     let (mut commands, mut meshes, mut materials, mut beam_mats, mut sprite_mats) =
-        state.get_mut(world);
+        state.get_mut(world).unwrap();
 
     const COUNT: usize = 500;
     let t0 = Instant::now();

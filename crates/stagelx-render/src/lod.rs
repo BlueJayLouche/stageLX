@@ -5,7 +5,7 @@ use bevy::{
     shader::ShaderRef,
     window::WindowResized,
 };
-use bevy::core_pipeline::core_3d::graph::Core3d;
+use bevy::core_pipeline::Core3d;
 
 use std::collections::HashMap;
 
@@ -323,6 +323,11 @@ pub fn apply_beam_lod(
         Without<BeamSprite>,
     >,
     beam_sprites: Query<(Entity, &BeamSprite, &mut Visibility), Without<BeamCone>>,
+    mut half_res_cam: Query<&mut Camera, With<BeamHalfResCamera>>,
+    mut composite_vis: Query<
+        &mut Visibility,
+        (With<BeamCompositeQuad>, Without<BeamCone>, Without<BeamSprite>),
+    >,
     mut beam_materials: ResMut<Assets<BeamMaterial>>,
     mut commands: Commands,
     mut sprite_by_id: Local<HashMap<FixtureId, Entity>>,
@@ -345,7 +350,10 @@ pub fn apply_beam_lod(
         *rebuild_lookup = false;
     }
 
+    let mut any_tier1 = false;
+
     for (entity, cone, tier, mut vis, mat_handle) in &mut beam_cones {
+        any_tier1 |= *tier == BeamLodTier::Tier1;
         // Cones are always visible; which cameras draw them is controlled purely
         // by render layers:
         //   layer 1 — FOH half-res target (Tier 1)
@@ -362,7 +370,7 @@ pub fn apply_beam_lod(
         commands.entity(entity).insert(cone_layers);
 
         // Set step count on material.
-        if let Some(mat) = beam_materials.get_mut(mat_handle) {
+        if let Some(mut mat) = beam_materials.get_mut(mat_handle) {
             mat.step_count = match tier {
                 BeamLodTier::Tier1 => 16,
                 BeamLodTier::Tier2 => 32,
@@ -383,6 +391,22 @@ pub fn apply_beam_lod(
                     commands.entity(sprite_entity).insert(Visibility::Hidden);
                 }
             }
+        }
+    }
+
+    // With no Tier-1 beams the half-res pass has nothing to draw — deactivate
+    // the camera (skips its whole Core3d graph) and hide the composite quad
+    // (its texture holds a stale frame once the camera stops rendering).
+    // Guarded writes: Camera is change-detected and a write forces render work.
+    for mut cam in &mut half_res_cam {
+        if cam.is_active != any_tier1 {
+            cam.is_active = any_tier1;
+        }
+    }
+    let quad_vis = if any_tier1 { Visibility::Visible } else { Visibility::Hidden };
+    for mut vis in &mut composite_vis {
+        if *vis != quad_vis {
+            *vis = quad_vis;
         }
     }
 
@@ -433,7 +457,7 @@ pub fn sort_beams_front_to_back(
             .unwrap_or(true);
 
         if should_update {
-            if let Some(mat) = beam_materials.get_mut(id) {
+            if let Some(mut mat) = beam_materials.get_mut(id) {
                 mat.depth_bias = desired_bias;
             }
             last_bias.insert(id, desired_bias);
@@ -477,7 +501,7 @@ pub fn resize_beam_render_target(
 
         // Update composite quad material.
         for mat_handle in &mut composite_q {
-            if let Some(mat) = materials.get_mut(&*mat_handle) {
+            if let Some(mut mat) = materials.get_mut(&*mat_handle) {
                 mat.beam_texture = new_handle.clone();
             }
         }

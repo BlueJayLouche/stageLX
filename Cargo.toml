@@ -24,24 +24,24 @@ stagelx-ui     = { path = "crates/stagelx-ui" }
 ds3            = "0.1"
 
 # Shared external deps
-bevy              = { version = "0.18.0" }
-bevy_egui         = { version = "0.39.1" }
+bevy              = { version = "0.19" }
+bevy_egui         = { version = "0.41" }
 # tokio removed — project uses sync threads + crossbeam (see PLAN.md Rule 17)
 crossbeam-channel = "0.5"
-dirs              = "5"
+dirs              = "6"
 indexmap          = { version = "2", features = ["serde"] }
 thiserror         = "2"
 serde             = { version = "1", features = ["derive"] }
-zip               = "2"
-quick-xml         = { version = "0.37", features = ["serialize"] }
+zip               = "8"
+quick-xml         = { version = "0.41", features = ["serialize"] }
 image             = { version = "0.25", default-features = false, features = ["png"] }
 serialport        = "4"
-midir             = "0.9"
-rosc              = "0.5"
-socket2           = { version = "0.5", features = ["all"] }
+midir             = "0.11"
+rosc              = "0.11"
+socket2           = { version = "0.6", features = ["all"] }
 tobj              = { version = "4", features = ["async"] }
 gltf              = "1"
-ufbx              = "0.10"
+ufbx              = "0.11"
 
 [profile.release]
 lto = "thin"
@@ -50,10 +50,15 @@ codegen-units = 1
 [profile.dev.package."*"]
 opt-level = 2
 
+# Same convention as rustjay-engine: release perf + symbols for samply/sample
+[profile.profiling]
+inherits = "release"
+debug = 1
+
 [package]
 name    = "stagelx"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [[bin]]
 name = "stagelx"
@@ -83,6 +88,6 @@ stagelx-io     = { workspace = true }
 stagelx-render = { workspace = true }
 stagelx-ui     = { workspace = true }
 # gdtf-sync binary only
-ureq           = { version = "2", features = ["json"] }
+ureq           = { version = "3", features = ["json", "cookies"] }
 serde_json     = "1"
 serde          = { version = "1", features = ["derive"] }

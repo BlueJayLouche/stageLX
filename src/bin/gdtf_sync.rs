@@ -174,9 +174,10 @@ fn main() {
 
     // ureq Agent maintains a cookie jar automatically — the session cookie from
     // login.php is re-sent on every subsequent request.
-    let agent = ureq::AgentBuilder::new()
-        .timeout(Duration::from_secs(60))
-        .build();
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_per_call(Some(Duration::from_secs(60)))
+        .build()
+        .into();
 
     // ── Login ─────────────────────────────────────────────────────────────────
     eprint!("Logging in as {} … ", args.user);
@@ -186,7 +187,8 @@ fn main() {
         .post(&format!("{API_BASE}/login.php"))
         .send_json(serde_json::json!({ "user": args.user, "password": args.pass }))
         .unwrap_or_else(|e| { eprintln!("\nHTTP error during login: {e}"); std::process::exit(1); })
-        .into_json()
+        .into_body()
+        .read_json()
         .unwrap_or_else(|e| { eprintln!("\nCould not parse login response: {e}"); std::process::exit(1); });
 
     if !login.result {
@@ -203,7 +205,8 @@ fn main() {
         .get(&format!("{API_BASE}/getList.php"))
         .call()
         .unwrap_or_else(|e| { eprintln!("\nHTTP error fetching list: {e}"); std::process::exit(1); })
-        .into_json()
+        .into_body()
+        .read_json()
         .unwrap_or_else(|e| { eprintln!("\nCould not parse list response: {e}"); std::process::exit(1); });
 
     if !list_resp.result {
@@ -276,7 +279,7 @@ fn main() {
         {
             Ok(resp) => {
                 let mut bytes = Vec::new();
-                if let Err(e) = resp.into_reader().read_to_end(&mut bytes) {
+                if let Err(e) = resp.into_body().into_reader().read_to_end(&mut bytes) {
                     eprintln!("read error: {e}");
                     failed += 1;
                 } else if bytes.len() < 4 {

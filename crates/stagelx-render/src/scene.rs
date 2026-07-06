@@ -1,5 +1,11 @@
-use bevy::{prelude::*, camera::{ScalingMode, Viewport, visibility::RenderLayers}, light::GlobalAmbientLight, window::WindowResized};
+use bevy::{
+    camera::{ScalingMode, Viewport, visibility::RenderLayers},
+    core_pipeline::tonemapping::Tonemapping,
+    light::GlobalAmbientLight,
+    prelude::*,
+};
 use crate::camera::FohCameraController;
+use stagelx_show::EguiViewportRect;
 
 #[derive(Component)]
 pub struct FohCamera;
@@ -10,63 +16,13 @@ pub struct TopCamera;
 #[derive(Component)]
 pub struct SideCamera;
 
-// Logical-pixel sizes of the egui panels surrounding the viewport area.
-// These MUST match the egui panel sizes in stagelx-ui (`ui_root_system`):
-//   left_rail  .exact_width(300)   right_rail .exact_width(420)
-//   top_bar    .exact_height(36)   status_bar .exact_height(22)
-//   bottom_strip .exact_height(248)
-// A mismatch lets the 3-D viewports slide under an egui panel.
-const LEFT_PANEL: f32 = 300.0;
-const RIGHT_PANEL: f32 = 420.0;
-const TOP_BAR: f32 = 36.0;
-const STATUS_BAR: f32 = 22.0;
-const BOTTOM_STRIP: f32 = 248.0;
-
-fn compute_viewports(pw: u32, ph: u32, sf: f32) -> (Viewport, Viewport, Viewport) {
-    let left  = (LEFT_PANEL   * sf).round() as u32;
-    let right = (RIGHT_PANEL  * sf).round() as u32;
-    let top   = (TOP_BAR      * sf).round() as u32;
-    let bot   = (STATUS_BAR   * sf).round() as u32;
-    let strip = (BOTTOM_STRIP * sf).round() as u32;
-
-    let vp_w = pw.saturating_sub(left + right);
-    let vp_h = ph.saturating_sub(top + bot + strip);
-
-    let foh_w  = (vp_w as f32 * 0.75) as u32;
-    let mini_w = vp_w.saturating_sub(foh_w);
-    let mini_h = vp_h / 2;
-
-    (
-        Viewport {
-            physical_position: UVec2::new(left, top),
-            physical_size: UVec2::new(foh_w, vp_h),
-            depth: 0.0..1.0,
-        },
-        Viewport {
-            physical_position: UVec2::new(left + foh_w, top),
-            physical_size: UVec2::new(mini_w, mini_h),
-            depth: 0.0..1.0,
-        },
-        Viewport {
-            physical_position: UVec2::new(left + foh_w, top + mini_h),
-            physical_size: UVec2::new(mini_w, vp_h.saturating_sub(mini_h)),
-            depth: 0.0..1.0,
-        },
-    )
-}
-
 pub fn setup_scene(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    windows: Query<&Window>,
 ) {
-    let (w, h, sf) = windows
-        .single()
-        .map(|win| (win.physical_width(), win.physical_height(), win.scale_factor()))
-        .unwrap_or((1440, 900, 2.0));
-
-    let (foh_vp, top_vp, side_vp) = compute_viewports(w, h, sf);
+    // Near-black clear so the stage reads like a dark venue, not an editor grey.
+    commands.insert_resource(ClearColor(Color::srgb(0.012, 0.014, 0.018)));
 
     // Stage floor
     commands.spawn((
@@ -95,13 +51,18 @@ pub fn setup_scene(
     // FOH perspective camera — main view (left 75%)
     // Layer 0 = scene geometry; layer 4 = FOH-only beam visuals (Tier-2 full-res
     // cones + Tier-0 billboards), kept off the ortho cameras' layers.
+    // Viewports start unset; `sync_viewports_to_ui` fits them to the egui
+    // central-panel rect as soon as the UI publishes it (and on every resize
+    // of the surrounding panels).
     commands.spawn((
         FohCamera,
         Camera3d::default(),
-        Camera {
-            viewport: Some(foh_vp),
-            ..default()
-        },
+        Camera::default(),
+        // Filmic tonemap for the hero view. Deliberately LDR: adding `Hdr`
+        // (for Bloom) blacks out this camera — it fights the layer-4 beam
+        // composite pipeline, and beam glow is already provided by the
+        // ray-marched composite, so HDR bloom buys nothing here.
+        Tonemapping::TonyMcMapface,
         RenderLayers::layer(0) | RenderLayers::layer(4),
         FohCameraController::default(),
     ));
@@ -111,7 +72,6 @@ pub fn setup_scene(
         TopCamera,
         Camera3d::default(),
         Camera {
-            viewport: Some(top_vp),
             order: 1,
             ..default()
         },
@@ -132,7 +92,6 @@ pub fn setup_scene(
         SideCamera,
         Camera3d::default(),
         Camera {
-            viewport: Some(side_vp),
             order: 2,
             ..default()
         },
@@ -171,16 +130,19 @@ pub fn setup_scene(
         DirectionalLight {
             color: Color::srgb(0.95, 0.95, 1.0),
             illuminance: 5000.0,
-            shadows_enabled: false,
+            shadow_maps_enabled: false,
             ..default()
         },
         Transform::from_xyz(6.0, 12.0, 10.0).looking_at(Vec3::new(0.0, 4.0, 0.0), Vec3::Y),
     ));
 }
 
+/// Fit the three camera viewports to the egui central-panel rect published by
+/// the UI each frame. This is what keeps the 3-D views aligned with the
+/// resizable panels — whatever the user drags, the cameras follow.
 #[allow(clippy::type_complexity)]
-pub fn update_viewports_on_resize(
-    mut resize_events: MessageReader<WindowResized>,
+pub fn sync_viewports_to_ui(
+    ui_rect: Res<EguiViewportRect>,
     windows: Query<&Window>,
     mut cameras: Query<(
         &mut Camera,
@@ -189,31 +151,68 @@ pub fn update_viewports_on_resize(
         Option<&SideCamera>,
     )>,
 ) {
-    if resize_events.is_empty() {
+    if !ui_rect.valid {
         return;
     }
-    resize_events.clear();
-
     let Ok(window) = windows.single() else {
         return;
     };
-    let w = window.physical_width();
-    let h = window.physical_height();
-    if w == 0 || h == 0 {
+    let (pw, ph) = (window.physical_width(), window.physical_height());
+    if pw == 0 || ph == 0 {
         return;
     }
     let sf = window.scale_factor();
-    let (foh_vp, top_vp, side_vp) = compute_viewports(w, h, sf);
+
+    // egui rect is in logical points; camera viewports are physical pixels.
+    let x0 = ((ui_rect.min_x * sf).round().max(0.0) as u32).min(pw);
+    let y0 = ((ui_rect.min_y * sf).round().max(0.0) as u32).min(ph);
+    let x1 = ((ui_rect.max_x * sf).round().max(0.0) as u32).min(pw);
+    let y1 = ((ui_rect.max_y * sf).round().max(0.0) as u32).min(ph);
+    let vp_w = x1.saturating_sub(x0);
+    let vp_h = y1.saturating_sub(y0);
+    if vp_w < 16 || vp_h < 16 {
+        return;
+    }
+
+    // Same splits the UI overlay draws: FOH left 75%, TOP/SIDE stacked right.
+    let foh_w = (vp_w as f32 * 0.75) as u32;
+    let mini_w = vp_w - foh_w;
+    let mini_h = vp_h / 2;
+
+    let foh_vp = Viewport {
+        physical_position: UVec2::new(x0, y0),
+        physical_size: UVec2::new(foh_w, vp_h),
+        depth: 0.0..1.0,
+    };
+    let top_vp = Viewport {
+        physical_position: UVec2::new(x0 + foh_w, y0),
+        physical_size: UVec2::new(mini_w, mini_h),
+        depth: 0.0..1.0,
+    };
+    let side_vp = Viewport {
+        physical_position: UVec2::new(x0 + foh_w, y0 + mini_h),
+        physical_size: UVec2::new(mini_w, vp_h - mini_h),
+        depth: 0.0..1.0,
+    };
 
     for (mut cam, foh, top, side) in &mut cameras {
-        cam.viewport = Some(if foh.is_some() {
-            foh_vp.clone()
+        let desired = if foh.is_some() {
+            &foh_vp
         } else if top.is_some() {
-            top_vp.clone()
+            &top_vp
         } else if side.is_some() {
-            side_vp.clone()
+            &side_vp
         } else {
             continue;
+        };
+        // Only write on change — Camera is change-detected and a write forces
+        // render-graph work.
+        let unchanged = cam.viewport.as_ref().is_some_and(|v| {
+            v.physical_position == desired.physical_position
+                && v.physical_size == desired.physical_size
         });
+        if !unchanged {
+            cam.viewport = Some(desired.clone());
+        }
     }
 }

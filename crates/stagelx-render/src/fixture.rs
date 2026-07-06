@@ -234,7 +234,7 @@ pub fn spawn_fixture(
                             intensity: 0.0,
                             color: Color::WHITE,
                             range: 40.0,
-                            shadows_enabled: false,
+                            shadow_maps_enabled: false,
                             ..default()
                         },
                         Transform::from_xyz(0.0, if cfg.suspended { -0.18 } else { 0.18 }, 0.0),
@@ -350,7 +350,7 @@ pub fn articulate_beams(
             continue;
         }
 
-        if let Some(mat) = beam_materials.get_mut(handle.id()) {
+        if let Some(mut mat) = beam_materials.get_mut(handle.id()) {
             if needs_full_update {
                 let (color, scale_xz, gobo_rotation, gobo_handle, _, _) = derive(cone.id);
                 mat.color         = color;
@@ -377,7 +377,7 @@ pub fn articulate_beams(
     if needs_full_update {
         for (sprite, sprite_handle, mut sprite_transform, _global_tf) in &mut sprite_q {
             let (color, scale_xz, gobo_rotation, gobo_handle, _, _) = derive(sprite.id);
-            if let Some(mat) = sprite_materials.get_mut(sprite_handle.id()) {
+            if let Some(mut mat) = sprite_materials.get_mut(sprite_handle.id()) {
                 mat.color = color;
                 mat.sprite_params = Vec4::new(gobo_rotation, 2.0, 0.0, 0.0);
                 mat.gobo = gobo_handle;
@@ -386,7 +386,7 @@ pub fn articulate_beams(
         }
         for (top, top_sprite_handle, mut top_sprite_transform, _global_tf) in &mut top_sprite_q {
             let (color, scale_xz, gobo_rotation, gobo_handle, _, _) = derive(top.id);
-            if let Some(mat) = sprite_materials.get_mut(top_sprite_handle.id()) {
+            if let Some(mut mat) = sprite_materials.get_mut(top_sprite_handle.id()) {
                 mat.color = color;
                 mat.sprite_params = Vec4::new(gobo_rotation, 2.0, 0.0, 0.0);
                 mat.gobo = gobo_handle;
